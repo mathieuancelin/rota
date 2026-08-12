@@ -1,6 +1,6 @@
 # Rota
 
-**Recurring local work — including agentic work — on your own machine.**
+**Recurring local automation and agent work on your own machine.**
 
 A job is a script to run, or a paragraph describing what you want achieved. The
 second kind is handed to a model with tools: it can read and write files in its own
