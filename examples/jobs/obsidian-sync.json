@@ -1,0 +1,29 @@
+{
+  "$schema": "https://rota.local/schemas/job.schema.json",
+  "id": "obsidian-sync",
+  "name": "Synchronisation Obsidian",
+  "description": "Commit, pull rebase et push du dépôt contenant les notes Obsidian.",
+  "enabled": true,
+  "triggers": [{ "type": "interval", "every": 5, "unit": "minutes" }],
+  "runner": {
+    "type": "bun",
+    "script": "/Users/moi/scripts/sync-obsidian.js",
+    "args": [],
+    "workingDirectory": "/Users/moi/obsidian-vaults",
+    "environment": {}
+  },
+  "execution": {
+    "timeoutSeconds": 120,
+    "allowConcurrentRuns": false,
+    "runOnStartup": false,
+    "catchUpOnWake": true,
+    "requiresUnlockedSession": true
+  },
+  "notifications": {
+    "onStart": false,
+    "onSuccess": false,
+    "onChange": true,
+    "onError": true
+  },
+  "history": { "enabled": true, "retainExecutions": 500 }
+}

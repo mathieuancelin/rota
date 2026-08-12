@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rota.local/schemas/config.schema.json",
+  "title": "Rota global configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "default": {},
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schedulerPaused": {
+      "type": "boolean",
+      "description": "Global pause of the scheduler, preserved across restarts.",
+      "default": false
+    },
+    "launchAtLogin": {
+      "type": "boolean",
+      "default": true
+    },
+    "theme": {
+      "enum": [
+        "system",
+        "light",
+        "dark"
+      ],
+      "description": "Appearance of the interface. \"system\" follows the macOS setting and switches with it, sunset included.",
+      "default": "system"
+    },
+    "engine": {
+      "type": "object",
+      "description": "Which engine this application drives. Embedded is the default and the whole desktop install: the scheduler runs inside the application. Remote points it at a rotad — on this machine or another — and the application then draws an engine it does not own. One configuration directory must never be opened by two engines at once; the embedded one takes a lock on it, which is exactly what stops an application and a daemon from scheduling the same jobs twice.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "embedded",
+            "remote"
+          ],
+          "description": "embedded runs the scheduler in this process; remote drives a rotad over HTTP.",
+          "default": "embedded"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where the daemon answers, e.g. http://127.0.0.1:47823. Only read in remote mode.",
+          "default": null
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Bearer token of that daemon. ${VARIABLE} is resolved from the .env file. Only read in remote mode.",
+          "default": null
+        }
+      }
+    },
+    "runners": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "bunPath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Explicit path to the bun binary. null = automatic resolution.",
+          "default": null
+        },
+        "dockerPath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Explicit path to the docker binary, for sandboxed jobs. null = automatic resolution.",
+          "default": null
+        }
+      }
+    },
+    "integrations": {
+      "type": "object",
+      "description": "Destinations shared by all jobs. An address declared here is declared once and for all, rather than copied into every definition — and it does not follow job files when they are shared.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "discordWebhookUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Outgoing webhook, enough to publish reports without creating a bot. Accepts ${VARIABLE}, resolved from the environment or the .env file: a webhook URL is worth a password. Failing that, the bot below can write too.",
+          "default": null
+        },
+        "discordBotToken": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Token of a Discord bot. Required to control Rota from a channel: a webhook can only write. Accepts ${VARIABLE}.",
+          "default": null
+        },
+        "discordChannelId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Identifier of the channel where the bot accepts commands, and where it answers. This is the only access control: anyone who writes in that channel controls Rota. Direct messages are ignored.",
+          "default": null
+        },
+        "discordControlEnabled": {
+          "type": "boolean",
+          "description": "Allows control from Discord. Without this flag the bot does not connect — pasting a token is not enough to open a remote control onto your machine.",
+          "default": false
+        },
+        "discordChatEnabled": {
+          "type": "boolean",
+          "description": "Allows the `chat` command, which sends a message written in the channel to the agent of a job. A flag of its own because it is not the same power as `run`: run executes the prompt the job carries, chat lets anyone in the channel compose one. Requires control to be enabled.",
+          "default": false
+        },
+        "mirrorReportsToDiscord": {
+          "type": "boolean",
+          "description": "An agent's report tool also publishes to Discord, on top of opening its window. No effect until a destination is configured.",
+          "default": true
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "description": "Local HTTP server. Three flags that stack on purpose: the first opens the port, the second exposes the API — which drives everything — and the third the webhook endpoint, which only starts jobs declaring a webhook trigger. Separating them lets a third-party service be given a webhook address without being given the rest.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Opens the port. Nothing is served until one of the two flags below is on as well, and nothing at all without a token.",
+          "default": false
+        },
+        "listen": {
+          "type": "string",
+          "description": "Listening address. 127.0.0.1 keeps the server on this machine; 0.0.0.0 makes it reachable from the network, which a webhook coming from outside needs — and past loopback, the token is the only thing between the network and this machine.",
+          "minLength": 1,
+          "default": "127.0.0.1"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Listening port. The default is nothing well-known on purpose: a common port would already be taken, or worse, would answer in place of what you meant to reach.",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 47823
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Token expected in \"Authorization: Bearer <token>\", or in the X-Rota-Token header. Required to start the server, loopback included: without it, anything running locally could drive Rota — a web page in an open tab included. Accepts ${VARIABLE}.",
+          "minLength": 16,
+          "default": null
+        },
+        "apiEnabled": {
+          "type": "boolean",
+          "description": "Exposes /api: list, run, stop, enable, history, logs, and chat with an agent. This is remote control of the machine — a job runs shell or an agent.",
+          "default": false
+        },
+        "webhookEnabled": {
+          "type": "boolean",
+          "description": "Exposes POST /webhook/<id>, which starts a job — and only a job that declares a webhook trigger. A job may carry a token of its own, so that the address handed out starts that job and nothing else.",
+          "default": false
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Values applied to jobs that do not specify them.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 104857600,
+          "default": 1048576
+        },
+        "inlineOutputBytes": {
+          "type": "integer",
+          "description": "Beyond this size, the output goes to a separate file instead of the JSONL.",
+          "minimum": 0,
+          "maximum": 1048576,
+          "default": 8192
+        },
+        "retainExecutions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 500
+        }
+      }
+    }
+  }
+}

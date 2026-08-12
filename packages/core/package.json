@@ -1,0 +1,21 @@
+{
+  "name": "@rota/core",
+  "version": "0.1.0",
+  "description": "The Rota engine: configuration, scheduler, runner, agents, history, HTTP API. No screen.",
+  "license": "MIT",
+  "private": true,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./schemas/*": "./schemas/*"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0"
+  }
+}

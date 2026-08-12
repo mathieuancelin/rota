@@ -1,0 +1,43 @@
+{
+  "$schema": "https://rota.local/schemas/job.schema.json",
+  "id": "veille-services",
+  "name": "Veille services",
+  "description": "Vérifie chaque matin que les services répondent, et ne prévient qu'en cas de changement.",
+  "enabled": false,
+  "triggers": [{ "type": "cron", "expression": "0 9 * * 1-5" }],
+  "runner": {
+    "type": "agent",
+    "workingDirectory": "/Users/moi/.config/rota/agents/veille-services",
+    "args": [],
+    "environment": {},
+    "agent": {
+      "systemPrompt": "${defaults.system_prompt}\n\n# Cette tâche\n\nTu supervises une poignée de services web. Ne rends compte que de ce qui a changé depuis la dernière exécution : un service qui répond comme hier n'est pas une nouvelle.",
+      "prompt": "Pour chaque service de la liste ci-dessous, fais un GET et note le code de retour.\n\n- https://exemple.fr\n- https://api.exemple.fr/health\n\nCompare avec ce que tu avais retenu sous « dernier-etat ». Si rien n'a changé, termine sans rien afficher. Si un service est tombé ou s'est rétabli, affiche un rapport markdown et signale l'effet.\n\nDans tous les cas, mémorise l'état constaté sous « dernier-etat ».",
+      "model": "gemma4:latest",
+      "reasoningEffort": "medium",
+      "maxIterations": 20,
+      "api": {
+        "baseUrl": "http://127.0.0.1:11434/v1",
+        "headers": {},
+        "timeoutSeconds": 120
+      },
+      "tools": {
+        "enabled": ["fetch", "memory", "todo", "report", "signal_change"],
+        "fetch": { "allowHosts": [".exemple.fr"] }
+      },
+      "memory": { "enabled": true }
+    }
+  },
+  "execution": {
+    "timeoutSeconds": 900,
+    "allowConcurrentRuns": false,
+    "catchUpOnWake": true
+  },
+  "notifications": {
+    "onStart": false,
+    "onSuccess": false,
+    "onChange": true,
+    "onError": true
+  },
+  "history": { "enabled": true, "retainExecutions": 500 }
+}

@@ -1,0 +1,128 @@
+name: CI
+
+# There was no CI before the extraction, which is why nothing enforced any of
+# it. Two things are checked here, and the second is the one worth having:
+#
+#   1. The suites pass — on macOS, the only supported platform, and on Linux,
+#      which is a stated goal and stays honest only if something runs there.
+#   2. The core suite passes under **both** runtimes. The daemon ships as a Bun
+#      binary and the application runs the same code under Electron's Node; a
+#      divergence between the two is a bug we would otherwise meet in
+#      production, on somebody's machine, at three in the morning.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Electron's postinstall downloads a ~100MB binary the tests never touch;
+      # only four of the suites need it, and they run below.
+      - name: Install
+        run: bun install
+
+      - name: core
+        run: node --test packages/core/test/*.test.js
+
+      - name: daemon
+        run: node --test packages/daemon/test/*.test.js
+
+      - name: cli
+        run: node --test packages/cli/test/*.test.js
+
+      # The application's suite patches Module._load from node:module to
+      # intercept require('electron'). That is a Node internal, it does not work
+      # under Bun, and it is the reason this package keeps its own command.
+      - name: app
+        run: node --test packages/app/test/*.test.js
+
+      # The same code, the other runtime — the daemon ships as a Bun binary and
+      # the application runs this under Electron's Node. The script says which
+      # files it skips and why (Bun has no mock timers yet) rather than quietly
+      # covering less than the name suggests.
+      - name: core, under Bun
+        run: node scripts/test-bun.js
+
+  compile:
+    name: compile (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-latest
+          - target: linux-x64
+            runner: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Compile both binaries
+        run: node scripts/compile.js ${{ matrix.target }}
+
+      # A binary that builds and cannot answer `--version` has not been built.
+      # On a runner whose architecture matches, this also proves it starts with
+      # no Node and no node_modules anywhere near it.
+      - name: The binaries answer for themselves
+        if: matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64'
+        run: |
+          cd "$(mktemp -d)"
+          "$GITHUB_WORKSPACE/dist/rotad-${{ matrix.target }}" --version
+          "$GITHUB_WORKSPACE/dist/rotactl-${{ matrix.target }}" --version
+          # And that the engine inside them loaded: `validate` reads the schemas,
+          # which only work if bun inlined them into the binary.
+          "$GITHUB_WORKSPACE/dist/rotactl-${{ matrix.target }}" validate --config-dir "$PWD" 
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/*-${{ matrix.target }}
+          retention-days: 7
+
+  renderer:
+    name: renderer builds
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      # The renderer imports the job schema through @rota/core's exports
+      # map. That resolution is the sort of thing that breaks quietly when a
+      # package's shape changes, and only in the packaged build.
+      - run: npm run build --workspace rota

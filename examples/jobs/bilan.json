@@ -1,0 +1,79 @@
+{
+  "$schema": "https://rota.local/schemas/job.schema.json",
+  "id": "bilan-matinal",
+  "name": "Bilan matinal",
+  "description": "Vérifie quelques points, puis fait rédiger le compte rendu par un agent et le publie dans le salon.",
+  "enabled": false,
+  "triggers": [
+    {
+      "type": "cron",
+      "expression": "0 9 * * 1-5"
+    },
+    {
+      "type": "discord",
+      "keyword": "bilan"
+    }
+  ],
+  "runner": {
+    "type": "workflow",
+    "workflow": {
+      "steps": [
+        {
+          "name": "services",
+          "continueOnError": true,
+          "runner": {
+            "type": "bun-inline",
+            "code": "for (const url of ['https://example.com', 'https://example.org']) {\n  const r = await fetch(url).catch(() => null)\n  console.log(`${r?.status ?? 'injoignable'}  ${url}`)\n}\n"
+          },
+          "receivesPreviousSteps": false
+        },
+        {
+          "name": "disque",
+          "continueOnError": true,
+          "runner": {
+            "type": "bun-inline",
+            "code": "const ligne = Bun.spawnSync(['df', '-h', '/']).stdout.toString().trim().split('\\n').at(-1)\nconst pct = Number(ligne.match(/(\\d+)%/)[1])\nconsole.log(`racine à ${pct} % d'occupation`)\nif (pct > 85) process.exit(1)\n"
+          },
+          "receivesPreviousSteps": false
+        },
+        {
+          "name": "dépôt",
+          "continueOnError": true,
+          "runner": {
+            "type": "bun-inline",
+            "workingDirectory": "/Users/mathieuancelin/projects/rota",
+            "code": "const modifies = Bun.spawnSync(['git', 'status', '--porcelain']).stdout.toString().trim()\nconsole.log(modifies === '' ? 'arbre propre' : `${modifies.split('\\n').length} fichier(s) non commités`)\n"
+          },
+          "receivesPreviousSteps": false
+        },
+        {
+          "name": "rapport",
+          "runner": {
+            "type": "agent",
+            "agent": {
+              "model": "gemma4:latest",
+              "temperature": 0,
+              "maxIterations": 6,
+              "api": {
+                "baseUrl": "http://127.0.0.1:11434/v1"
+              },
+              "tools": {
+                "enabled": [
+                  "report_discord"
+                ]
+              },
+              "prompt": "Les sorties des étapes précédentes te sont données plus bas.\n\nPublie un compte rendu markdown court avec report_discord : un titre, une phrase de synthèse, puis une puce par étape commençant par ✅ ou ❌ selon son statut. N'invente rien qui ne soit dans ces sorties."
+            }
+          }
+        }
+      ]
+    }
+  },
+  "execution": {
+    "timeoutSeconds": 900
+  },
+  "notifications": {
+    "onChange": true,
+    "onError": true
+  }
+}

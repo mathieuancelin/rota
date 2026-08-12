@@ -1,0 +1,96 @@
+appId: com.rota.app
+productName: Rota
+copyright: Rota
+
+directories:
+  output: release
+  buildResources: build
+
+# Named explicitly, because the default drops "-x64" from x64 artifacts and
+# keeps it for every other architecture — which makes a release listing look
+# like the Intel build is the one without an architecture.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+# No auto-update in v1: without this, electron-builder tries to produce
+# publication metadata and fails for want of a configured repository.
+publish: null
+
+afterPack: build/after-pack.js
+
+# The main process and the preload are not bundled: they are embedded as they
+# are. Only the renderer goes through Vite. The engine arrives the same way, as
+# @rota/core under node_modules — electron-builder resolves the workspace
+# symlink and copies a real directory, which the Phase 0 spike verified.
+#
+# The schemas are no longer listed here: they belong to the package that
+# validates against them, and travel with it.
+files:
+  - src/main/**/*
+  - src/preload/**/*
+  - dist/renderer/**/*
+  - assets/tray/**/*
+  - assets/tray-linux/**/*
+  - assets/notification/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/node_modules/**/{test,__tests__,tests,example,examples,doc,docs}/**'
+
+# The daemon travels with the application. Nobody needs it — the application
+# embeds the engine — but somebody who later wants the scheduler to survive
+# quitting the window should not have to go and find a second download for a
+# binary built from the code already in their Applications folder.
+#
+# `bin/rotad` is compiled for the target being packaged, immediately before
+# electron-builder runs — see scripts/bundle-daemon.js. It is marked optional so
+# that a build on a machine without Bun produces an application rather than an
+# error: the engine is embedded either way, and the daemon is a convenience.
+extraResources:
+  - from: bin/rotad
+    to: rotad
+
+mac:
+  category: public.app-category.utilities
+  icon: build/icon.icns
+  # No arch list here on purpose: electron-builder would then build every one of
+  # them on every invocation, and the rotad compiled beside it is for a
+  # single architecture. The caller says which — `--mac --arm64`, `--mac --x64` —
+  # and the release workflow runs one job per architecture so that the daemon in
+  # the bundle always matches the bundle.
+  target:
+    - dmg
+  # Menu bar application: no icon in the Dock, no entry in Cmd-Tab.
+  extendInfo:
+    LSUIElement: true
+    NSHumanReadableCopyright: Rota
+  # Personal use: no Apple Developer account. electron-builder applies an ad-hoc
+  # signature, without which an arm64 app will not start at all.
+  identity: null
+  notarize: false
+
+# The application runs on Linux: verified starting, scheduling and running a job
+# on a Debian container. It has its own coloured tray icons (a macOS template
+# image would arrive as a flat black shape), and launch-at-login writes a
+# .desktop entry into ~/.config/autostart, which is the mechanism there.
+#
+# One thing is not ours to fix: GNOME has shipped no system tray since version 3.
+# With an AppIndicator extension the icon appears; without one it does not, and
+# the way back to the window is to start Rota again — the single-instance
+# lock turns a second launch into a request to show it.
+linux:
+  category: Utility
+  icon: assets/app/icon.iconset/icon_512x512.png
+  synopsis: Local recurring task engine with a graphical interface
+  target:
+    - AppImage
+    - deb
+
+dmg:
+  title: Rota
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

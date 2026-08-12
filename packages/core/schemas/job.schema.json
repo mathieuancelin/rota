@@ -1,0 +1,613 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rota.local/schemas/job.schema.json",
+  "title": "Rota job",
+  "description": "Definition of a recurring job run by Rota.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "runner"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Schema reference, for completion in the editor." },
+    "id": {
+      "type": "string",
+      "description": "Unique identifier. Also used as the history file name, hence the restricted character set.",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "maxLength": 64
+    },
+    "name": {
+      "type": "string",
+      "description": "Name shown in the interface and in notifications.",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "default": "",
+      "maxLength": 2000
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "A disabled job stays loaded, but none of its triggers fire — timer, webhook or keyword alike. Running it by hand stays available: that is how a job gets put right before being left to itself.",
+      "default": true
+    },
+    "triggers": {
+      "type": "array",
+      "description": "What starts this job. Several are allowed, and they do not have to be of the same kind: a nightly cron plus a webhook is one job with two ways in. An empty list is legitimate — such a job only ever runs on demand, from the interface, from Discord, or from another job.",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type"],
+        "allOf": [
+          {
+            "if": { "properties": { "type": { "const": "cron" } }, "required": ["type"] },
+            "then": { "required": ["expression"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "interval" } }, "required": ["type"] },
+            "then": { "required": ["every", "unit"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "discord" } }, "required": ["type"] },
+            "then": { "required": ["keyword"] }
+          }
+        ],
+        "properties": {
+          "type": {
+            "enum": ["interval", "cron", "webhook", "discord"],
+            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled trigger is ignored, the others keep working. Turning one off beats deleting it when you want it back next week.",
+            "default": true
+          },
+          "every": {
+            "type": "integer",
+            "description": "For the interval type: delay counted from the end of the previous execution.",
+            "minimum": 1
+          },
+          "unit": { "enum": ["seconds", "minutes", "hours", "days"] },
+          "expression": {
+            "type": "string",
+            "description": "For the cron type: five fields — minute, hour, day of month, month, day of week — evaluated in local time. The @daily, @hourly, @weekly, @monthly and @yearly shorthands are accepted. No seconds, and no L, # or ? extensions.",
+            "minLength": 1
+          },
+          "token": {
+            "type": "string",
+            "description": "For the webhook type: a token of its own, expected in the Authorization header instead of the server's. Accepts ${VARIABLE}. Without it, the server's token applies — declare one to hand out an address that starts this job and nothing else.",
+            "minLength": 1
+          },
+          "keyword": {
+            "type": "string",
+            "description": "For the discord type: the word that starts this job when the bot is named with it — \"@Rota deploy\". It must not collide with a built-in command, nor with another job's keyword. Independent of `run <id>`, which keeps working for every job.",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "maxLength": 32
+          }
+        }
+      }
+    },
+    "runner": { "$ref": "#/definitions/runner" },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Beyond that: SIGTERM, then SIGKILL five seconds later.",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 300
+        },
+        "allowConcurrentRuns": {
+          "type": "boolean",
+          "description": "When false, an occurrence falling during an execution yields skipped-already-running.",
+          "default": false
+        },
+        "runOnStartup": { "type": "boolean", "default": false },
+        "catchUpOnWake": {
+          "type": "boolean",
+          "description": "On wake, catches up exactly once if occurrences were missed.",
+          "default": true
+        },
+        "requiresUnlockedSession": {
+          "type": "boolean",
+          "description": "The job needs an unlocked session: readable keychain, populated SSH agent, available interface. With the screen locked it is treated as during sleep — nothing is started, and catchUpOnWake decides on the catch-up when the session unlocks.",
+          "default": false
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "description": "Maximum size kept for stdout and stderr; beyond that the output is truncated.",
+          "minimum": 1024,
+          "maximum": 104857600,
+          "default": 1048576
+        },
+        "sandbox": {
+          "type": "object",
+          "description": "Execution inside a disposable Docker container. The container only sees the script, mounted read-only, and the working directory if declared — not the SSH agent, not the keychain, not the rest of the disk.",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "image": {
+              "type": "string",
+              "description": "Docker image. It must provide bun, or sh/bash for a shell job. For an agent job it must also provide \"sleep\": the container stays open for the duration of the execution.",
+              "minLength": 1,
+              "default": "oven/bun:1"
+            },
+            "network": {
+              "type": "boolean",
+              "description": "Container network. Off by default: that is what makes it a sandbox.",
+              "default": false
+            },
+            "mountWorkingDirectory": {
+              "type": "boolean",
+              "description": "Mounts runner.workingDirectory read-write. Without it, the container has no write access to the host disk at all.",
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "onStart": { "type": "boolean", "default": false },
+        "onSuccess": {
+          "type": "boolean",
+          "description": "Notifies on every success, including when the script had nothing to do.",
+          "default": false
+        },
+        "onChange": {
+          "type": "boolean",
+          "description": "Notifies only when the script reported a real effect, by writing \"::rota:changed::\" to its standard output. The text following the marker becomes the body of the notification.",
+          "default": false
+        },
+        "onError": { "type": "boolean", "default": true }
+      }
+    },
+    "history": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "retainExecutions": {
+          "type": "integer",
+          "description": "Number of executions kept in the JSONL file.",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 500
+        }
+      }
+    }
+  },
+  "definitions": {
+    "toolName": {
+      "type": "string",
+      "enum": [
+        "fetch",
+        "exec",
+        "shell",
+        "file_read",
+        "file_list",
+        "file_write",
+        "file_del",
+        "todo",
+        "memory",
+        "report",
+        "report_discord",
+        "ask_user",
+        "confirm",
+        "signal_change",
+        "run_job",
+        "sub_agent"
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "bun-inline" } }, "required": ["type"] },
+          "then": { "required": ["code"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "agent" } }, "required": ["type"] },
+          "then": { "required": ["agent"] }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["bun", "shell"] } }, "required": ["type"] },
+          "then": { "required": ["script"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "workflow" } }, "required": ["type"] },
+          "then": { "required": ["workflow"] }
+        }
+      ],
+      "properties": {
+        "type": {
+          "enum": ["bun", "bun-inline", "shell", "agent", "workflow"],
+          "description": "bun runs a JS/TS file, bun-inline the code carried by the job itself, shell hands the file to sh or bash, agent entrusts the job to a language model equipped with tools, and workflow chains steps — each of them one of the four above, or a reference to another job. A script has no tools, but it can still address you through its standard output: a line \"::rota:report:: title\" opens a report window and \"::rota:report_discord:: title\" sends it to the channel, everything up to \"::rota:end::\" being the markdown body."
+        },
+        "script": {
+          "type": "string",
+          "description": "Absolute path of the script to run. An inline shell command is not accepted: no shell string is ever assembled.",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string",
+          "description": "JavaScript code of the job, for the bun-inline type. Rota writes it to a file before every execution and runs Bun on it: the code is never passed as an argument nor interpreted by a shell.",
+          "maxLength": 262144
+        },
+        "interpreter": {
+          "enum": ["sh", "bash"],
+          "description": "Ignored when type is bun.",
+          "default": "sh"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory of the process. Defaults to the script's directory — and for an agent job, agents/<id> in the configuration directory. It is created for you by an agent job and by a workflow, whose steps inherit it when they declare none; anywhere else it has to exist. For an agent it is also the boundary of its file tools: they do not leave it."
+        },
+        "environment": {
+          "type": "object",
+          "description": "Variables added to the minimal allowlist (PATH, HOME, USER, LANG, TMPDIR, SSH_AUTH_SOCK).",
+          "additionalProperties": { "type": "string" },
+          "default": {}
+        },
+        "agent": {
+          "type": "object",
+          "description": "Agent configuration, for the agent type. The model receives the prompt and a list of tools, and Rota runs the loop until it asks for no more.",
+          "additionalProperties": false,
+          "required": ["prompt", "model"],
+          "properties": {
+            "systemPrompt": {
+              "type": "string",
+              "description": "Standing instructions. \"${defaults.system_prompt}\" inserts Rota's own — who you are, which tools exist, how to behave when nobody is watching — and that is the default value of this field. Write \"${defaults.system_prompt}\" followed by your own instructions to extend them, or leave the reference out to start from scratch. The job name, the trigger, the sandbox and the contents of memory are appended automatically.",
+              "default": "${defaults.system_prompt}",
+              "maxLength": 262144
+            },
+            "prompt": {
+              "type": "string",
+              "description": "What the agent is asked to do. It is also the text pre-filled in the chat tab. It accepts \"${defaults.system_prompt}\" as well.",
+              "minLength": 1,
+              "maxLength": 262144
+            },
+            "model": {
+              "type": "string",
+              "description": "Model name, as the API expects it. It must be able to call tools.",
+              "minLength": 1
+            },
+            "reasoningEffort": {
+              "enum": ["low", "medium", "high"],
+              "description": "Sent as \"reasoning_effort\". Absent, nothing is sent. A server that does not know the field sees it removed and the request replayed."
+            },
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "maxIterations": {
+              "type": "integer",
+              "description": "Maximum number of round trips with the model. Once reached, the execution fails rather than looping.",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25
+            },
+            "api": {
+              "type": "object",
+              "description": "Connection to an OpenAI-compatible API. Ollama on localhost by default.",
+              "additionalProperties": false,
+              "default": {},
+              "properties": {
+                "baseUrl": {
+                  "type": "string",
+                  "description": "API root, without \"/chat/completions\".",
+                  "minLength": 1,
+                  "default": "http://127.0.0.1:11434/v1"
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Headers added to the request. Values accept ${VARIABLE} references, resolved at run time from the environment or from the .env file in the configuration directory: an API key does not have to live in clear text in the job definition.",
+                  "additionalProperties": { "type": "string" },
+                  "default": {}
+                },
+                "timeoutSeconds": {
+                  "type": "integer",
+                  "description": "Timeout of a single request to the model, distinct from the execution's overall timeout.",
+                  "minimum": 1,
+                  "maximum": 3600,
+                  "default": 120
+                },
+                "extraBody": {
+                  "type": "object",
+                  "description": "Fields merged as-is into the request body, for whatever the server expects and Rota does not know about.",
+                  "default": {}
+                }
+              }
+            },
+            "tools": {
+              "type": "object",
+              "description": "Tools made available to the model. Everything is denied except what is listed.",
+              "additionalProperties": false,
+              "default": {},
+              "properties": {
+                "enabled": {
+                  "type": "array",
+                  "description": "fetch: HTTP calls. exec: a command and its arguments, no shell. shell: a command line handed to sh -c. file_read, file_list, file_write, file_del: access to the working directory. todo: an in-memory task list. memory: persistent memory between executions — the system prompt lists its keys, the tools read and write the values. report: a markdown report window. report_discord: a report sent to the Discord webhook declared in the global settings. ask_user, confirm: blocking questions. signal_change: reports a real effect, for onChange notifications. run_job: triggers another Rota job, or its own after a delay. sub_agent: delegates a task to a second agent of this same job, which inherits the model and the tools and answers back.",
+                  "items": { "$ref": "#/definitions/toolName" },
+                  "uniqueItems": true,
+                  "default": ["fetch", "file_read", "file_list", "todo", "memory", "report"]
+                },
+                "fetch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "allowHosts": {
+                      "type": "array",
+                      "description": "Allowed hosts. Empty, all of them are. A leading dot covers subdomains: \".example.com\".",
+                      "items": { "type": "string", "minLength": 1 },
+                      "default": []
+                    },
+                    "maxResponseBytes": {
+                      "type": "integer",
+                      "minimum": 1024,
+                      "maximum": 10485760,
+                      "default": 262144
+                    }
+                  }
+                },
+                "system": {
+                  "type": "object",
+                  "description": "Settings for exec and shell.",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "timeoutSeconds": {
+                      "type": "integer",
+                      "description": "Timeout of a command. Once exceeded, the process group is killed and the model is told.",
+                      "minimum": 1,
+                      "maximum": 3600,
+                      "default": 120
+                    },
+                    "maxOutputBytes": {
+                      "type": "integer",
+                      "minimum": 256,
+                      "maximum": 10485760,
+                      "default": 65536
+                    }
+                  }
+                },
+                "jobs": {
+                  "type": "object",
+                  "description": "Settings for run_job.",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "allow": {
+                      "type": "array",
+                      "description": "Jobs this agent is allowed to trigger. Empty, all of them are — including those that run system commands.",
+                      "items": { "type": "string", "minLength": 1 },
+                      "default": []
+                    }
+                  }
+                },
+                "subagents": {
+                  "type": "object",
+                  "description": "Settings for sub_agent. A sub-agent inherits everything else from this job: the model, the temperature, the API, the working directory, the memory and the container.",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "maxDepth": {
+                      "type": "integer",
+                      "description": "How far the delegation may go. 1, a sub-agent cannot delegate in turn — which is what stops a job that misunderstood its task from spawning a tree of them. 0 refuses the tool outright.",
+                      "minimum": 0,
+                      "maximum": 3,
+                      "default": 1
+                    },
+                    "maxPerRun": {
+                      "type": "integer",
+                      "description": "How many sub-agents one execution may start in total, across the whole tree — not per agent.",
+                      "minimum": 1,
+                      "maximum": 20,
+                      "default": 3
+                    },
+                    "deny": {
+                      "type": "array",
+                      "description": "Tools withdrawn from sub-agents. Empty, a sub-agent has exactly what this job has. This is where you hand out a reader that cannot write, or keep run_job for yourself.",
+                      "items": { "$ref": "#/definitions/toolName" },
+                      "uniqueItems": true,
+                      "default": []
+                    },
+                    "maxIterations": {
+                      "type": "integer",
+                      "description": "Turn budget of one sub-agent. Declare none and it inherits the job's — which is usually too generous for a task that was meant to be narrow.",
+                      "minimum": 1,
+                      "maximum": 200
+                    }
+                  }
+                },
+                "files": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "maxReadBytes": {
+                      "type": "integer",
+                      "minimum": 256,
+                      "maximum": 10485760,
+                      "default": 131072
+                    }
+                  }
+                },
+                "interaction": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "default": {},
+                  "properties": {
+                    "timeoutSeconds": {
+                      "type": "integer",
+                      "description": "Time left to the user to answer ask_user or confirm. Once exceeded, the question is abandoned and the agent carries on: a scheduled job must not stay blocked in front of an empty screen.",
+                      "minimum": 5,
+                      "maximum": 86400,
+                      "default": 120
+                    }
+                  }
+                }
+              }
+            },
+            "mcp": {
+              "type": "array",
+              "description": "MCP servers whose tools join Rota's own. Their names are prefixed with the connector's — \"github__search\" — because two servers will happily expose the same name. A connector that fails to start is reported in the transcript without failing the execution.",
+              "default": [],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "transport"],
+                "allOf": [
+                  {
+                    "if": { "properties": { "transport": { "const": "stdio" } }, "required": ["transport"] },
+                    "then": { "required": ["command"] }
+                  },
+                  {
+                    "if": { "properties": { "transport": { "const": "http" } }, "required": ["transport"] },
+                    "then": { "required": ["url"] }
+                  }
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Prefix for this server's tools. Short, no spaces: it counts towards the 64 characters a tool name must not exceed.",
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                    "maxLength": 32
+                  },
+                  "transport": {
+                    "enum": ["stdio", "http"],
+                    "description": "stdio starts the server as a child process and talks over its standard input and output. http talks to an already running \"Streamable HTTP\" server."
+                  },
+                  "enabled": { "type": "boolean", "default": true },
+                  "command": {
+                    "type": "string",
+                    "description": "For stdio: the server executable. Started on the host, never inside the sandbox container.",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "default": []
+                  },
+                  "environment": {
+                    "type": "object",
+                    "description": "For stdio: process variables, added to the usual allowlist. Values accept ${VARIABLE}.",
+                    "additionalProperties": { "type": "string" },
+                    "default": {}
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "For http: the MCP endpoint, the one that answers POSTs.",
+                    "minLength": 1
+                  },
+                  "headers": {
+                    "type": "object",
+                    "description": "For http: request headers. Values accept ${VARIABLE} — a token does not have to live in clear text in the definition.",
+                    "additionalProperties": { "type": "string" },
+                    "default": {}
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "description": "Timeout of a call to the server, handshake included.",
+                    "minimum": 1,
+                    "maximum": 3600,
+                    "default": 60
+                  },
+                  "tools": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "default": {},
+                    "properties": {
+                      "allow": {
+                        "type": "array",
+                        "description": "Tools kept, under their original name, without the prefix. Empty, all of them are.",
+                        "items": { "type": "string", "minLength": 1 },
+                        "default": []
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "memory": {
+              "type": "object",
+              "description": "Persistent memory, in memory/<id>.mem.json. Its keys are listed in the system prompt at the start of every execution; the values are read with memory_read, so that what is remembered informs the agent without steering it.",
+              "additionalProperties": false,
+              "default": {},
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "maxEntries": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000,
+                  "default": 100
+                }
+              }
+            }
+          }
+        },
+        "workflow": {
+          "type": "object",
+          "description": "Steps of a workflow job, run one after another in the order written. The whole chain is a single execution: one history entry, one output, one notification. What each step wrote is folded into that output, under its name.",
+          "additionalProperties": false,
+          "required": ["steps"],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "default": [],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Label of the step in the execution transcript. Without it, the referenced job name or the runner type is used.",
+                    "maxLength": 120
+                  },
+                  "job": {
+                    "type": "string",
+                    "description": "Identifier of an existing job to run at this step. It runs with its own definition — runner, environment, timeout, sandbox — but writes no history entry of its own and sends no notification: the workflow tells the whole story in one entry. Exclusive with \"runner\".",
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                    "maxLength": 64
+                  },
+                  "runner": {
+                    "$ref": "#/definitions/runner",
+                    "description": "A runner written here rather than pointing at a job — same fields as the job's own, minus the workflow type: a workflow does not nest. Exclusive with \"job\"."
+                  },
+                  "receivesPreviousSteps": {
+                    "type": "boolean",
+                    "description": "Hand this step what the steps before it produced. A script reads them in ROTA_STEPS, a JSON array of {name, status, durationMs, output}; an agent finds them appended to its prompt, in prose. On by default — it is what lets a final step sum up the chain. Turn it off for a step that has no use for them: an agent pays for that text on every round trip with the model, and a script would carry an environment variable it never reads.",
+                    "default": true
+                  },
+                  "continueOnError": {
+                    "type": "boolean",
+                    "description": "Carry on to the next step even if this one fails. Off by default: a chain whose second link broke rarely has anything useful to do with the third.",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

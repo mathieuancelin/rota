@@ -1,0 +1,1231 @@
+:root {
+  --bg: #f4f4f6;
+  --surface: #ffffff;
+  --surface-alt: #fafafb;
+  --border: #dedee3;
+  --text: #1a1a1f;
+  --text-muted: #6b6b76;
+  --accent: #3b6ef5;
+  --ok: #1f8f4e;
+  --warn: #b06f00;
+  --error: #cc2f36;
+  --error-bg: #fdf0f0;
+  --warn-bg: #fdf7ea;
+  --radius: 10px;
+  --title-bar: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --surface: #262629;
+    --surface-alt: #2d2d31;
+    --border: #3a3a40;
+    --text: #f0f0f3;
+    --text-muted: #9a9aa4;
+    --accent: #6d92ff;
+    --ok: #4cc47c;
+    --warn: #e0a63a;
+    --error: #ff6b6b;
+    --error-bg: #3a2224;
+    --warn-bg: #362d1c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+.mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+.tone-ok {
+  color: var(--ok);
+}
+.tone-error {
+  color: var(--error);
+}
+.tone-warn {
+  color: var(--warn);
+}
+.tone-running {
+  color: var(--accent);
+}
+.tone-muted {
+  color: var(--text-muted);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface-alt);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* The background is restated explicitly: `button:hover:not(:disabled)` is more
+   specific than `button.primary` and would otherwise impose the light
+   background of ordinary buttons, under text that stayed white. */
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-align: left;
+}
+
+button.link:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+/* Everything that takes input, rather than a list of types to keep up to date:
+   a "password" or "search" field added later would otherwise fall back to the
+   browser's native style — a white background, unreadable in a dark theme.
+   Checkboxes and radio buttons keep their system rendering, which already
+   follows the theme. */
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- structure ---------------------------------------------------------- */
+
+.titlebar {
+  height: var(--title-bar);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 92px; /* room for the macOS window buttons */
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  -webkit-app-region: drag;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.titlebar .title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.titlebar button,
+.titlebar .pill,
+.titlebar nav {
+  -webkit-app-region: no-drag;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: 16px;
+  margin-right: auto;
+}
+
+.tab {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.tab:hover {
+  background: var(--surface-alt);
+}
+
+.tab.active {
+  background: var(--surface-alt);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill.running {
+  color: var(--accent);
+}
+.pill.paused {
+  color: var(--warn);
+}
+.pill.error {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+
+main {
+  padding: 18px 20px 40px;
+  max-width: 940px;
+  margin: 0 auto;
+}
+
+section + section,
+.columns + section,
+section + .columns {
+  margin-top: 24px;
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0;
+  font-weight: 600;
+}
+
+h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 14px 0 6px;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 8px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.crumbs h1 {
+  margin-right: auto;
+}
+
+/* --- tableau de bord ----------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.tile-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile-label {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.tile.tone-ok .tile-value {
+  color: var(--ok);
+}
+.tile.tone-error .tile-value {
+  color: var(--error);
+}
+.tile.tone-warn .tile-value {
+  color: var(--warn);
+}
+.tile.tone-running .tile-value {
+  color: var(--accent);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.row + .row {
+  margin-top: 6px;
+}
+
+.row .time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.row > .muted:last-of-type {
+  margin-left: auto;
+}
+
+/* --- configuration problems ----------------------------------------- */
+
+.issue {
+  background: var(--error-bg);
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.issue + .issue {
+  margin-top: 8px;
+}
+
+.issue .file {
+  font-weight: 600;
+  color: var(--error);
+}
+
+.issue ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+/* --- jobs ---------------------------------------------------------------- */
+
+/* The whole card opens the job. Hover says so — without it nothing tells a
+   clickable card from a block of text — and focus shows it from the keyboard,
+   the card being reachable by tabbing. */
+.job {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.job:hover {
+  background: var(--surface-alt);
+}
+
+.job:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The card's buttons keep the cursor that belongs to them. */
+.job .actions {
+  cursor: default;
+}
+
+.job + .job {
+  margin-top: 10px;
+}
+
+/* A disabled job can still be run by hand — that is even how you get it right
+   before scheduling it. Only its content is dimmed: carried by the whole card,
+   the fading reached the buttons, which then looked inactive. A child's opacity
+   cannot make up for it, since it multiplies with the parent's. */
+.job.disabled > *:not(.actions) {
+  opacity: 0.6;
+}
+
+.job .name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.job .description {
+  color: var(--text-muted);
+  grid-column: 1 / -1;
+}
+
+.job .meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.job .runs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+}
+
+@media (max-width: 720px) {
+  .job .runs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.job .runs dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.job .runs dd {
+  margin: 0;
+}
+
+.job .command {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 7px 9px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.job .actions {
+  display: flex;
+  gap: 6px;
+  align-items: start;
+}
+
+.badge {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.badge.stale {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.badge.off {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.badge.running {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.badge.changed {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  font-weight: 500;
+}
+
+/* --- historique ---------------------------------------------------------- */
+
+.execution {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.execution + .execution {
+  margin-top: 6px;
+}
+
+.execution-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+}
+
+.execution-head .status {
+  font-weight: 600;
+  min-width: 96px;
+}
+
+.execution-head .when {
+  font-variant-numeric: tabular-nums;
+}
+
+.execution-head .chevron {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.execution-body {
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.execution-body .cause {
+  background: var(--error-bg);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 12px 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 16px;
+  margin: 12px 0 0;
+}
+
+@media (max-width: 720px) {
+  .facts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.facts dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+pre.mono {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 11px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+pre.output {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.load-more {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* --- editor ------------------------------------------------------------- */
+
+/* Definition / Code tabs, for bun-inline jobs. Same style as the navigation
+   tabs, more discreet: we are staying inside the same view. */
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+/* --- sortie en direct ----------------------------------------------------- */
+
+.live {
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.live header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.live header .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.live .dot.running {
+  color: var(--accent);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.live header button.link {
+  margin-left: auto;
+}
+
+/* Finished: the banner fades, the text stays. */
+.live.done header {
+  color: var(--text-muted);
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Scrolling is driven by hand, so the height has to be fixed: otherwise the
+   view grows without end under a talkative job. */
+.live .output {
+  height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+
+.editor-tabs .muted {
+  margin-left: 8px;
+}
+
+/* Separates the history from the tabs that do edit the definition. */
+.editor-tabs .tab-rule {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--border);
+}
+
+/* Embedded in the editor, the history no longer has a breadcrumb: what is left
+   is its refresh button, and room to say what is being shown. */
+.history-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.editor .monaco {
+  height: 460px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* The container carries the background; the Monaco themes leave it transparent
+   so as to follow the system theme without duplicating the palette. */
+.editor .monaco .monaco-editor,
+.editor .monaco .monaco-editor .overflow-guard {
+  border-radius: var(--radius);
+}
+
+.editor .monaco > .muted {
+  padding: 14px;
+}
+
+/* Hidden rather than unmounted: Monaco keeps its model, its undo history and
+   its scroll position from one tab to the next. */
+.editor .monaco.hidden {
+  display: none;
+}
+
+/* --- job form ------------------------------------------------------------
+   Everything is scoped under `.form`: "field" is too common a name to live at
+   the root, and the settings were already using it on their side. --- ------- */
+
+.form .form-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.form .form-section h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.form .form-section .fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+@media (max-width: 760px) {
+  .form .form-section .fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.form .field.wide,
+.form .form-note {
+  grid-column: 1 / -1;
+}
+
+.form .field-label {
+  font-weight: 500;
+}
+
+.form .field-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.form .field input[type='text'],
+.form .field input[type='number'],
+.form .field select,
+.form .field textarea {
+  width: 100%;
+}
+
+.form .field textarea {
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+/* A checkbox reads with its label to the right, not underneath. */
+.form .field.toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.form .field.toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.form .form-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.form .pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.form .pair {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.form .pair input:first-child {
+  flex: 0 0 34%;
+}
+
+.form .pair input:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.form .checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+
+@media (max-width: 760px) {
+  .form .checklist {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form .checklist label {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.editor .issue {
+  margin-top: 10px;
+}
+
+/* --- settings ------------------------------------------------------------ */
+
+.settings h2:not(:first-child) {
+  margin-top: 24px;
+}
+
+/* Prose and buttons outside a card: aligned on the cards' inner edge, not on
+   their border, otherwise they float to the left of everything else. */
+.settings > p {
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+.settings > button {
+  margin-left: 12px;
+}
+
+.settings .issue {
+  margin-bottom: 12px;
+}
+
+/* A field the application can also fill in: the input keeps the full width,
+   the button takes what it needs. */
+.settings .field-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings .field-actions input {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.setting + .setting {
+  margin-top: 6px;
+}
+
+/* The label takes the remaining room and pushes the control against the right
+   edge: without that, the column of controls shifts from one row to the next
+   with the length of the explanations. */
+.setting > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting small {
+  display: block;
+  color: var(--text-muted);
+}
+
+/* A checkbox reads at the head of the row, aligned on the label's first line
+   rather than centred on a two-line block. */
+.setting > input[type='checkbox'] {
+  flex: none;
+  margin: 2px 0 0;
+  align-self: flex-start;
+}
+
+/* A fixed width truncated URLs and tokens; a wide basis that knows how to
+   shrink keeps the right column aligned without making the content unreadable. */
+.setting.field > :is(input, select) {
+  flex: 0 1 300px;
+  min-width: 120px;
+}
+
+/* --- assorted states -------------------------------------------------------- */
+
+.empty {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 26px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty p {
+  margin: 0 0 12px;
+}
+
+.empty button + button {
+  margin-left: 8px;
+}
+
+/* --- creating a job ------------------------------------------------------ */
+
+.list-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+/* h2 already carries a bottom margin: we cancel it to align on the button. */
+.list-header h2 {
+  margin-bottom: 10px;
+}
+
+.list-header button {
+  margin-left: auto;
+}
+
+.list-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.list-tools input[type='search'] {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+}
+
+.list-tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.new-job {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.new-job .fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.new-job label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.new-job label input,
+.new-job label select {
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.new-job label input {
+  min-width: 220px;
+}
+
+.new-job p {
+  margin: 0 0 8px;
+}
+
+.new-job .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* MCP servers: a list of sub-forms inside the form. */
+.form .connector {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.form .connector .fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 760px) {
+  .form .connector .fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Triggers: same shape as the MCP servers — a list of sub-forms, each framed,
+   because a job can carry several and you must see at a glance where one ends
+   and the next begins. */
+.form .trigger {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  padding: 10px 12px;
+}
+
+@media (max-width: 760px) {
+  .form .trigger {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The type and its removal on the same row: those are the two things you do to
+   a trigger you have just read. */
+.form .trigger-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.form .trigger-head .field {
+  flex: 1;
+}
+
+.form .trigger .toggle {
+  grid-column: 1 / -1;
+}
+
+.form .form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+/* Workflow steps: same shape as the triggers and the MCP servers — a list of
+   framed sub-forms, because the order matters and you must see at a glance
+   where one ends and the next begins. */
+.form .step {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  padding: 10px 12px;
+}
+
+@media (max-width: 760px) {
+  .form .step {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form .step-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.form .step-head .field {
+  flex: 1;
+}
+
+/* The rank is what says what the workflow does: it reads before the name. */
+.form .step-rank {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.form .step-actions {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.form .step-actions button {
+  padding: 4px 8px;
+}
+
+.form .step .field.wide textarea {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.form .step .toggle {
+  grid-column: 1 / -1;
+}
+
+/* An irreversible action is not signalled by its position alone. */
+button.danger {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, var(--border));
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--error-bg);
+}
+
+/* Chat tab: it takes the editor's place, whose height is fixed — a thread that
+   pushed the page without end would read badly. */
+.chat-tab {
+  height: 460px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.chat-tab.hidden {
+  display: none;
+}
+
+
+/* A step's inline code: a real editor, not a text area. The height is fixed and
+   resizable — a two-hundred-line script must not push the rest of the form off
+   the screen, but eight lines are not enough to find your way. */
+.form .code-field {
+  height: 260px;
+  min-height: 90px;
+  resize: vertical;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}

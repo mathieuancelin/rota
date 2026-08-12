@@ -1,0 +1,396 @@
+name: Release
+
+# Everything a release ships, built from one tag.
+#
+# Three products, and they are not equally portable, so the workflow does not
+# pretend otherwise:
+#
+#   - **rotad** and **rotactl** — genuinely standalone. `bun build
+#     --compile` inlines ajv and both JSON schemas, so the binary opens a
+#     configuration directory on a machine with neither Node nor Bun on it.
+#     Four targets: macOS and Linux, arm64 and x64.
+#   - **Rota.app** — macOS arm64 and x64, as .dmg. This is the supported
+#     desktop platform.
+#   - **Rota for Linux** — AppImage and .deb, x64. It has its own coloured
+#     tray icons, writes a .desktop autostart entry, and reads the screen lock
+#     from logind. The one thing it cannot have is a tray on GNOME, which has
+#     shipped none since version 3; the notes say so.
+#
+# Linux arm64 gets binaries but no application, deliberately: an arm64 Linux box
+# running Rota is a machine with no screen, and that is exactly the case
+# `rotad` exists for.
+#
+# Nothing is published until every build has succeeded — the release is created
+# in one step at the end, from artifacts, rather than growing an asset at a time
+# and leaving a half-release behind when something fails.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (must already exist)'
+        required: true
+      draft:
+        description: 'Create the release as a draft'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # A release named v0.2.0 carrying binaries that answer 0.1.0 is the sort of
+  # thing nobody notices until somebody is reading a bug report months later.
+  verify:
+    name: the tag and the manifests agree
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - run: node scripts/check-version.js "$TAG"
+
+      - id: version
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  # The suites, once, before anything is built. A release is a bad moment to
+  # find out.
+  test:
+    name: tests
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: npm test
+      - run: node scripts/test-bun.js
+
+  binaries:
+    name: ${{ matrix.target }} binaries
+    needs: [verify, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS binaries are built on macOS so they can be signed there.
+          - target: darwin-arm64
+            runner: macos-latest
+          - target: darwin-x64
+            runner: macos-latest
+          # Bun cross-compiles Linux targets from anywhere; a Linux runner keeps
+          # it simple and costs nothing.
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Compile
+        run: node scripts/compile.js ${{ matrix.target }}
+
+      # Bun ad-hoc signs its macOS output already, but as "a.out". macOS on
+      # Apple Silicon refuses an unsigned binary outright, so this is not
+      # optional decoration — it is re-done here only to carry an identifier
+      # that says what the file is.
+      - name: Sign, ad-hoc
+        if: startsWith(matrix.target, 'darwin')
+        run: |
+          for name in rotad rotactl; do
+            codesign --force --sign - --identifier "com.rota.$name" \
+              "dist/$name-${{ matrix.target }}"
+            codesign --verify --strict "dist/$name-${{ matrix.target }}"
+          done
+
+      # The binary has to start on the machine that built it before it is
+      # offered to anyone else's. Run from an empty directory: no repository, no
+      # node_modules, nothing to fall back on.
+      - name: The binaries answer for themselves
+        if: matrix.target == 'darwin-arm64' || matrix.target == 'linux-x64'
+        run: |
+          workdir="$(mktemp -d)"
+          cp "dist/rotad-${{ matrix.target }}" "$workdir/rotad"
+          cp "dist/rotactl-${{ matrix.target }}" "$workdir/rotactl"
+          cd "$workdir"
+          test "$(./rotad --version)" = "${{ needs.verify.outputs.version }}"
+          test "$(./rotactl --version)" = "${{ needs.verify.outputs.version }}"
+          # `validate` loads the schemas, which only exist if bun inlined them.
+          mkdir -p config/jobs
+          ./rotactl validate --config-dir config
+
+      # tar.gz rather than the bare file: it is what preserves the executable
+      # bit through a download, which is the difference between "it runs" and a
+      # confusing permission error.
+      - name: Package
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          mkdir -p artifacts
+          for name in rotad rotactl; do
+            staging="$(mktemp -d)/$name-$version-${{ matrix.target }}"
+            mkdir -p "$staging"
+            cp "dist/$name-${{ matrix.target }}" "$staging/$name"
+            chmod +x "$staging/$name"
+            cp LICENSE "$staging/"
+            tar -czf "artifacts/$name-$version-${{ matrix.target }}.tar.gz" \
+              -C "$(dirname "$staging")" "$(basename "$staging")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  app-macos:
+    name: Rota.app (${{ matrix.arch }})
+    needs: [verify, test]
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build the renderer
+        run: npm run build --workspace rota
+
+      # Compiled for the architecture being packaged, not for the runner's: a
+      # daemon shipped for the wrong one fails at the moment somebody first
+      # needs it.
+      - name: Compile the daemon that travels with it
+        run: node packages/app/scripts/bundle-daemon.js darwin ${{ matrix.arch }}
+
+      - name: Package
+        working-directory: packages/app
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
+
+      # The bundle is ad-hoc signed by build/after-pack.js. An unsigned or
+      # mis-signed bundle will not launch on Apple Silicon at all, so it is
+      # worth finding that out here rather than from a user.
+      #
+      # The path is globbed rather than written out: electron-builder calls the
+      # output directory `mac-arm64` but plain `mac` for x64, which is the same
+      # x64-is-the-default habit that artifactName had to be pinned for.
+      - name: The bundle is signed, and the daemon in it matches it
+        run: |
+          app="$(find packages/app/release -maxdepth 2 -name 'Rota.app' -print -quit)"
+          test -n "$app" || { echo "no Rota.app was produced"; exit 1; }
+          codesign --verify --strict "$app"
+          test -x "$app/Contents/Resources/rotad"
+          # A daemon built for the other architecture would fail at the moment
+          # somebody first reaches for it, which is months from now. `file` says
+          # "x86_64" where electron-builder says "x64", so the two names are
+          # mapped rather than compared.
+          case "${{ matrix.arch }}" in
+            arm64) expected=arm64 ;;
+            x64)   expected=x86_64 ;;
+          esac
+          file "$app/Contents/Resources/rotad" | grep -q "$expected\b"
+
+      - name: Collect
+        run: |
+          mkdir -p artifacts
+          cp packages/app/release/*.dmg artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macos-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  app-linux:
+    name: Rota for Linux
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build the renderer
+        run: npm run build --workspace rota
+
+      - name: Compile the daemon that travels with it
+        run: node packages/app/scripts/bundle-daemon.js linux x64
+
+      - name: Package
+        working-directory: packages/app
+        run: npx electron-builder --linux --x64 --publish never
+
+      - name: Collect
+        run: |
+          mkdir -p artifacts
+          cp packages/app/release/*.AppImage packages/app/release/*.deb artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-linux-x64
+          path: artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: [verify, binaries, app-macos, app-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+
+      - name: Gather, and checksum
+        working-directory: incoming
+        run: |
+          mkdir -p ../release
+          find . -type f \( -name '*.tar.gz' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \) \
+            -exec mv {} ../release/ \;
+          cd ../release
+          # One file, sorted, so `sha256sum -c` works on any of them and the
+          # list reads the same on every release.
+          sha256sum * | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Write the notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          ## Install
+
+          **macOS — the application.** Download the \`.dmg\` for your machine
+          (\`arm64\` for Apple Silicon, \`x64\` for Intel) and drag it to
+          Applications. It is **ad-hoc signed, not notarized**: on first launch,
+          right-click → Open, or clear the quarantine flag with
+          \`xattr -dr com.apple.quarantine /Applications/Rota.app\`.
+
+          Every \`.app\` carries a matching \`rotad\` at
+          \`Contents/Resources/rotad\`, so you can switch to running the
+          scheduler without a window later without downloading anything else.
+
+          **Any machine — the daemon and the command line.** Standalone: no Node,
+          no Bun, no runtime of any kind.
+
+          \`\`\`sh
+          tar -xzf rotad-${VERSION}-linux-x64.tar.gz
+          sudo install rotad-${VERSION}-linux-x64/rotad /usr/local/bin/
+          rotad run --config-dir ~/.config/rota
+          \`\`\`
+
+          \`rotad service launchd\` and \`rotad service systemd\` print a
+          unit file for the init system and install nothing — that part is yours
+          to decide.
+
+          ## What is in this release
+
+          | | macOS arm64 | macOS x64 | Linux x64 | Linux arm64 |
+          |---|---|---|---|---|
+          | \`rotad\` | ✅ | ✅ | ✅ | ✅ |
+          | \`rotactl\` | ✅ | ✅ | ✅ | ✅ |
+          | Application | ✅ | ✅ | ✅ | — |
+
+          **On GNOME, install an [AppIndicator
+          extension](https://extensions.gnome.org/extension/615/appindicator-support/).**
+          GNOME has shipped no system tray since version 3; with the extension the
+          icon appears and Rota behaves as it does anywhere else, without it
+          there is no icon. Closing the window is not a trap either way — the
+          scheduler keeps running, and starting Rota again brings the window
+          back. KDE, XFCE, Cinnamon and Budgie carry a tray natively.
+
+          Linux arm64 gets the two binaries and no application, on purpose: an
+          arm64 Linux box running Rota is usually a machine with no screen,
+          which is exactly what \`rotad\` is for.
+
+          ## Verifying a download
+
+          \`\`\`sh
+          sha256sum -c SHA256SUMS --ignore-missing
+          \`\`\`
+          EOF
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ github.event.inputs.draft }}
+        run: |
+          set -euo pipefail
+
+          flags=()
+          # "false" is a non-empty string, so this has to be a comparison rather
+          # than a "is it set" test — otherwise unticking the box still produces
+          # a draft.
+          [ "${DRAFT:-}" = "true" ] && flags+=(--draft)
+          # A tag with a suffix — v1.0.0-rc1, v2.0.0-beta.3 — is not a release
+          # anybody should get by asking for the latest.
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+
+          # Re-running after a failure should finish the job rather than refuse
+          # because the release it half-created is in the way.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "the release already exists — replacing its assets"
+            gh release upload "$TAG" release/* --clobber
+            gh release edit "$TAG" --notes-file notes.md --title "Rota $TAG"
+          else
+            # ${flags[@]+...} rather than "${flags[@]}": an empty array under
+            # `set -u` is an unbound variable on older bash, and a release
+            # workflow is a bad place to depend on the runner's bash being new.
+            gh release create "$TAG" release/* \
+              --title "Rota $TAG" \
+              --notes-file notes.md \
+              --verify-tag \
+              ${flags[@]+"${flags[@]}"}
+          fi

@@ -1,0 +1,22 @@
+{
+  "name": "rota-workspace",
+  "version": "0.1.0",
+  "description": "Rota workspace: the engine, a daemon, a CLI and the Electron application.",
+  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "start": "npm start --workspace rota",
+    "build": "npm run build --workspace rota",
+    "package": "npm run package --workspace rota",
+    "icons": "npm run icons --workspace rota",
+    "test": "npm test --workspaces --if-present",
+    "compile": "node scripts/compile.js",
+    "test:bun": "node scripts/test-bun.js"
+  }
+}

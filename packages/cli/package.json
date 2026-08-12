@@ -1,0 +1,20 @@
+{
+  "name": "@rota/cli",
+  "version": "0.1.0",
+  "description": "rotactl: driving Rota from a terminal.",
+  "license": "MIT",
+  "private": true,
+  "main": "src/index.js",
+  "bin": {
+    "rotactl": "src/index.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@rota/core": "*"
+  }
+}

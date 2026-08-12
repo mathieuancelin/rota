@@ -1,0 +1,17 @@
+# Pinned, not left to the default.
+#
+# Bun picks its linker per install, and on a fresh tree it reaches for the
+# isolated layout — everything under node_modules/.bun, reached through symlinks
+# at the top. That is a fine layout in general and the wrong one here, for two
+# reasons that both bite late:
+#
+#   - electron-builder collects the production dependencies out of node_modules
+#     to put them in the asar. The Phase 0 spike verified it dereferences a
+#     workspace symlink and copies a real directory; it did that against a
+#     hoisted tree, and a packaged application that cannot find @rota/core is a
+#     failure you meet after the .dmg is built, not during.
+#   - It is the layout the repository has always had, so pinning it means a
+#     fresh clone resolves the way this one does rather than the way its
+#     node_modules happened to be left.
+[install]
+linker = "hoisted"
