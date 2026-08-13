@@ -261,6 +261,9 @@ function triggerErrors(job) {
     if (trigger.type !== 'after' && (trigger.job !== undefined || trigger.on !== undefined)) {
       errors.push(`${field}: "job" and "on" belong to the after type`)
     }
+    if (trigger.type !== 'path' && (trigger.path !== undefined || trigger.settleSeconds !== undefined)) {
+      errors.push(`${field}: "path" and "settleSeconds" belong to the path type`)
+    }
 
     // A job waiting for itself would either never start or never stop; the
     // identifier is right there in the same document, so it is caught here
@@ -494,6 +497,10 @@ function describeTrigger(trigger) {
   if (trigger.type === 'webhook') return 'on webhook'
   if (trigger.type === 'discord') return `on “${trigger.keyword}”`
   if (trigger.type === 'power') return `on ${trigger.event}`
+  if (trigger.type === 'path') {
+    const name = trigger.path.replace(/\/+$/, '').split('/').pop() || trigger.path
+    return `on changes in ${name}`
+  }
   if (trigger.type === 'after') {
     const on = trigger.on ?? 'success'
     return on === 'any' ? `after ${trigger.job}` : `after ${trigger.job} ${on}`

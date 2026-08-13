@@ -947,3 +947,182 @@ test('a stopped scheduler has let go of the runner', async () => {
   ended(scheduler, runner, 'backup', 'success')
   assert.deepEqual(runs, [])
 })
+
+// --- the path trigger -----------------------------------------------------------
+//
+// Real files in a real directory: a watcher is one of the few things worth
+// testing against the actual system, because what it does depends on the
+// platform's event coalescing rather than on our code.
+
+const fsp = require('node:fs')
+const os = require('node:os')
+const nodePath = require('node:path')
+
+const SETTLE = 0.05 // seconds — the same rule, at a speed a test can wait for
+
+function watchedDir(t) {
+  const dir = fsp.mkdtempSync(nodePath.join(os.tmpdir(), 'rota-watch-'))
+  t.after(() => fsp.rmSync(dir, { recursive: true, force: true }))
+  return dir
+}
+
+/**
+ * The harness, with the scheduler guaranteed to let go of its watchers.
+ *
+ * An open fs.watch handle keeps the process alive, so a stop() written after
+ * the assertions turns any failing test into a hung run — which is what the
+ * first version of this file did.
+ */
+function watching(t, jobs, options) {
+  const built = harness(jobs, options)
+  t.after(() => built.scheduler.stop())
+  return built
+}
+
+const pathJob = (id, path, overrides = {}) =>
+  makeJob(id, { triggers: [{ type: 'path', path, settleSeconds: SETTLE }], ...overrides })
+
+const settled = () => new Promise((resolve) => setTimeout(resolve, SETTLE * 1000 + 250))
+
+// A watcher ignores its first settle window on purpose — see watch-path.js —
+// so anything written before it has warmed up describes the state we found
+// rather than a change.
+const warmedUp = settled
+
+test('writing into a watched directory starts the job', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  runs.length = 0
+
+  await warmedUp()
+  fsp.writeFileSync(nodePath.join(dir, 'invoice.pdf'), 'x')
+  await settled()
+
+  assert.deepEqual(runs, [{ jobId: 'sort', trigger: 'path' }])
+})
+
+test('a burst of files is one execution, not one per file', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  runs.length = 0
+
+  await warmedUp()
+  // What unpacking an archive looks like from here.
+  for (let index = 0; index < 40; index++) {
+    fsp.writeFileSync(nodePath.join(dir, `file-${index}`), 'x')
+  }
+  await settled()
+
+  assert.equal(runs.length, 1, `expected one run, got ${runs.length}`)
+})
+
+test('a file written a level down still counts', async (t) => {
+  const dir = watchedDir(t)
+  fsp.mkdirSync(nodePath.join(dir, 'nested'))
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  runs.length = 0
+
+  await warmedUp()
+  fsp.writeFileSync(nodePath.join(dir, 'nested', 'deep.txt'), 'x')
+  await settled()
+
+  assert.equal(runs.length, 1, 'a directory is watched recursively')
+})
+
+test('nothing happens while nothing is written', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  runs.length = 0
+
+  await settled()
+  assert.deepEqual(runs, [])
+})
+
+test('a paused scheduler watches nothing', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)], { paused: true })
+  await scheduler.start()
+  runs.length = 0
+
+  await warmedUp()
+  fsp.writeFileSync(nodePath.join(dir, 'x'), 'x')
+  await settled()
+
+  assert.deepEqual(runs, [])
+  assert.equal(scheduler.watchers.size, 0, 'and it did not even open a handle')
+})
+
+test('stopping lets go of the watchers', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  assert.equal(scheduler.watchers.size, 1)
+
+  scheduler.stop()
+  assert.equal(scheduler.watchers.size, 0)
+
+  runs.length = 0
+  await warmedUp()
+  fsp.writeFileSync(nodePath.join(dir, 'after-stop'), 'x')
+  await settled()
+  assert.deepEqual(runs, [])
+})
+
+test('a path that is not there is reported, and does not take the rest down', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler, runs } = watching(t, [
+    pathJob('missing', nodePath.join(dir, 'nowhere')),
+    pathJob('live', dir),
+  ])
+  await scheduler.start()
+
+  assert.equal(scheduler.unwatchable.size, 1, 'the absent one is named')
+  assert.equal(scheduler.watchers.size, 1, 'the other one is still watched')
+
+  runs.length = 0
+  await warmedUp()
+  fsp.writeFileSync(nodePath.join(dir, 'x'), 'x')
+  await settled()
+  assert.deepEqual(runs, [{ jobId: 'live', trigger: 'path' }])
+})
+
+test('a watcher is not rebuilt on every sync', async (t) => {
+  const dir = watchedDir(t)
+  const { scheduler } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+
+  const before = scheduler.watchers.get('sort::0') ?? [...scheduler.watchers.values()][0]
+  scheduler.sync()
+  scheduler.sync()
+  const after = [...scheduler.watchers.values()][0]
+
+  // Tearing an inotify handle down and rebuilding it every time any job's state
+  // moved would be a lot of syscalls for no change.
+  assert.equal(before, after, 'the same watcher is kept')
+})
+
+test('a watcher does not report the state it found', async (t) => {
+  const dir = watchedDir(t)
+  // Written before anything watches it. On macOS fs.watch delivers the recent
+  // past when it attaches, so without the warm-up this file would arrive as if
+  // it had just landed — and every restart of the scheduler would run every
+  // path job.
+  fsp.writeFileSync(nodePath.join(dir, 'was-already-here'), 'x')
+
+  const { scheduler, runs } = watching(t, [pathJob('sort', dir)])
+  await scheduler.start()
+  runs.length = 0
+
+  await warmedUp()
+  await settled()
+  assert.deepEqual(runs, [], 'nothing happened while we were watching')
+
+  // And it is warm now, not deaf.
+  fsp.writeFileSync(nodePath.join(dir, 'landed-since'), 'x')
+  await settled()
+  assert.equal(runs.length, 1)
+})

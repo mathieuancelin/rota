@@ -16,6 +16,7 @@ const { EventEmitter } = require('node:events')
 
 const logger = require('../lib/logger')
 const { isTimed, nextRunAt, missedOccurrences, timeoutFor } = require('./next-run')
+const { watchPath, DEFAULT_SETTLE_MS } = require('./watch-path')
 
 // The label an `after` run carries in the history, and the mark that stops it
 // from starting anything in turn.
@@ -68,6 +69,10 @@ class Scheduler extends EventEmitter {
     this.pendingPower = new Map()
     // Bound once so that stop() can take it off again.
     this.onFinished = (execution) => this.#onFinished(execution)
+    /** One filesystem watcher per `path` trigger, keyed like the timers. */
+    this.watchers = new Map()
+    /** Paths we could not watch, so that the interface can say which. */
+    this.unwatchable = new Map()
   }
 
   isPaused() {
@@ -124,6 +129,7 @@ class Scheduler extends EventEmitter {
   stop() {
     this.started = false
     this.runner.off?.('finished', this.onFinished)
+    for (const key of [...this.watchers.keys()]) this.#unwatch(key)
     for (const { timer } of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
   }
@@ -169,6 +175,7 @@ class Scheduler extends EventEmitter {
 
     const jobs = this.store.getJobs()
     const active = new Set()
+    const watched = new Set()
 
     for (const job of jobs) {
       if (!job.enabled || this.isPaused()) continue
@@ -179,13 +186,70 @@ class Scheduler extends EventEmitter {
         active.add(keyOf(job.id, index))
         this.#arm(job, trigger, index)
       }
+      // Watchers follow the same three rules as the timers, which is why they
+      // are built in the same pass: a paused scheduler watches nothing, a
+      // disabled job watches nothing, and a job waiting on an unlocked session
+      // waits for it here too.
+      for (const [index, trigger] of (job.triggers ?? []).entries()) {
+        if (trigger.type !== 'path' || trigger.enabled === false) continue
+        watched.add(keyOf(job.id, index))
+        this.#watch(job, trigger, index)
+      }
     }
 
     for (const key of [...this.timers.keys()]) {
       if (!active.has(key)) this.#disarm(key)
     }
+    for (const key of [...this.watchers.keys()]) {
+      if (!watched.has(key)) this.#unwatch(key)
+    }
 
     this.emit('changed')
+  }
+
+  /**
+   * Starts watching for a `path` trigger, or keeps watching what it already
+   * watches. Rebuilding a watcher on every sync() would mean tearing down and
+   * recreating an inotify handle every time any job's state moved.
+   */
+  #watch(job, trigger, index) {
+    const key = keyOf(job.id, index)
+    const existing = this.watchers.get(key)
+    if (existing && existing.target === trigger.path) return
+    if (existing) this.#unwatch(key)
+
+    const settleMs = (trigger.settleSeconds ?? DEFAULT_SETTLE_MS / 1000) * 1000
+    try {
+      const handle = watchPath(
+        trigger.path,
+        () => {
+          // Re-read rather than close over what the job was when the watcher
+          // was built: a definition edited since must not be run from a stale
+          // copy.
+          const current = this.store.getJob(job.id)
+          if (!current || !current.enabled || this.isPaused()) return
+          if (this.#deferredForLock(current)) return
+          logger.info(`${current.id}: ${trigger.path} changed`)
+          this.#trigger(current, 'path')
+        },
+        { settleMs },
+      )
+      this.watchers.set(key, { target: trigger.path, handle })
+      this.unwatchable.delete(key)
+    } catch (err) {
+      // A path that is not there yet, or not readable. Said once rather than on
+      // every sync, and retried the next time the configuration moves.
+      if (!this.unwatchable.has(key)) {
+        logger.warn(`${job.id}: cannot watch ${trigger.path} — ${err.message}`)
+      }
+      this.unwatchable.set(key, { jobId: job.id, path: trigger.path, error: err.message })
+    }
+  }
+
+  #unwatch(key) {
+    this.watchers.get(key)?.handle.close()
+    this.watchers.delete(key)
+    this.unwatchable.delete(key)
   }
 
   #anchorFor(key) {

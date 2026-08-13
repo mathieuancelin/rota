@@ -58,12 +58,16 @@
           {
             "if": { "properties": { "type": { "const": "after" } }, "required": ["type"] },
             "then": { "required": ["job"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "path" } }, "required": ["type"] },
+            "then": { "required": ["path"] }
           }
         ],
         "properties": {
           "type": {
-            "enum": ["interval", "cron", "webhook", "discord", "power", "after"],
-            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish."
+            "enum": ["interval", "cron", "webhook", "discord", "power", "after", "path"],
+            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish. path waits for a file or a directory to change."
           },
           "enabled": {
             "type": "boolean",
@@ -101,6 +105,17 @@
             "type": "string",
             "description": "For the after type: the job whose end starts this one. A job cannot wait for itself, and a job started this way does not itself start others — `after` reacts, it does not chain. Chaining is what the workflow runner is for.",
             "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "path": {
+            "type": "string",
+            "description": "For the path type: the absolute path of a file or a directory to watch. A directory is watched recursively, so a file written a level down counts. The job starts once the changes have stopped, not on the first of them: unpacking an archive is one event, not five hundred.",
+            "pattern": "^/"
+          },
+          "settleSeconds": {
+            "type": "integer",
+            "description": "For the path type: how long the directory must be quiet before the job starts. Absent, two seconds. Raise it for something that writes in long bursts. Deliberately without a schema default, which would be written into every trigger of every type.",
+            "minimum": 1,
+            "maximum": 3600
           },
           "on": {
             "type": "string",

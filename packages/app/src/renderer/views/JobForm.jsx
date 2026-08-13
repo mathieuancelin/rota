@@ -486,6 +486,7 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
             <option value="discord">Discord keyword</option>
             <option value="power">Machine wakes or unlocks</option>
             <option value="after">Another job finished</option>
+            <option value="path">A file or directory changed</option>
           </select>
         </Field>
         <button type="button" className="link" onClick={onRemove} title="Remove this trigger">
@@ -529,6 +530,18 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
           <Note>
             A job started this way starts no others in turn — chaining steps in order is
             what a workflow job is for. A job cannot wait for itself.
+          </Note>
+        </>
+      )}
+
+      {type === 'path' && (
+        <>
+          <Text {...props} path={at('path')} label="Path" placeholder="/Users/you/Downloads" />
+          <Numeric {...props} path={at('settleSeconds')} label="Quiet for (seconds)" />
+          <Note>
+            A directory is watched recursively. The job starts once the writing has
+            stopped, not on the first change — unpacking an archive is one event, not
+            five hundred. Two seconds if you leave it empty.
           </Note>
         </>
       )}

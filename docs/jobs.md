@@ -142,7 +142,8 @@ any type of job takes any kind of trigger, and it takes as many as it likes.
   { "type": "webhook" },
   { "type": "discord", "keyword": "deploy" },
   { "type": "power", "event": "unlock" },
-  { "type": "after", "job": "backup", "on": "failure" }
+  { "type": "after", "job": "backup", "on": "failure" },
+  { "type": "path", "path": "/Users/you/Downloads" }
 ]
 ```
 
@@ -205,6 +206,36 @@ is the other thing — reacting to a job you did not start.
 
 A job cannot wait for itself; the editor refuses it as it is typed, since both
 names are in the same file.
+
+#### `path`: when a file or a directory changes
+
+```json
+{ "type": "path", "path": "/Users/you/Downloads", "settleSeconds": 2 }
+```
+
+An absolute path. A directory is watched **recursively**, so a file written a
+level down counts — verified under both Node and Bun, on macOS and on Linux,
+because the daemon ships as a Bun binary and a trigger that quietly missed
+nested files there would be worse than one that did not exist.
+
+**The job starts once the writing has stopped, not on the first change.**
+Unpacking an archive is one event, not five hundred: the trigger waits for the
+directory to go quiet for `settleSeconds` — two by default — and then runs the
+job once. Raise it for something that writes in long bursts.
+
+**A watcher reports what happens after it arrives, never the state it found.**
+That is not a subtlety, it is a measured behaviour of the platform: on macOS,
+`fs.watch` delivers the recent past when it attaches — a change to the directory
+itself, and files written just before the watcher existed, arriving as if they
+had just landed. Left alone, every start of the scheduler would have run every
+`path` job. So the first `settleSeconds` after attaching are a warm-up that
+never fires. The cost is honest and small: a change landing in those two seconds
+is not reported, and the next one is.
+
+A path that does not exist is named in the log and does not stop the other
+watchers; it is retried whenever the configuration moves. And like every other
+trigger, a paused scheduler watches nothing, a disabled job watches nothing, and
+a job waiting on an unlocked session waits before it is watched.
 
 > **Coming from an earlier version.** Jobs used to carry a single `schedule` object.
 > Rota rewrites them into `triggers` on first launch and keeps the original as
