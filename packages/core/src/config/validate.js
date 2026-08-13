@@ -255,6 +255,19 @@ function triggerErrors(job) {
     if (trigger.type !== 'discord' && trigger.keyword !== undefined) {
       errors.push(`${field}.keyword: belongs to the discord type`)
     }
+    if (trigger.type !== 'power' && trigger.event !== undefined) {
+      errors.push(`${field}.event: belongs to the power type`)
+    }
+    if (trigger.type !== 'after' && (trigger.job !== undefined || trigger.on !== undefined)) {
+      errors.push(`${field}: "job" and "on" belong to the after type`)
+    }
+
+    // A job waiting for itself would either never start or never stop; the
+    // identifier is right there in the same document, so it is caught here
+    // rather than left to be discovered.
+    if (trigger.type === 'after' && trigger.job === job.id) {
+      errors.push(`${field}.job: a job cannot wait for itself`)
+    }
 
     if (trigger.type === 'webhook' && trigger.token !== undefined) {
       errors.push(...referenceErrors(trigger.token, `${field}.token`))
@@ -481,6 +494,10 @@ function describeTrigger(trigger) {
   if (trigger.type === 'webhook') return 'on webhook'
   if (trigger.type === 'discord') return `on “${trigger.keyword}”`
   if (trigger.type === 'power') return `on ${trigger.event}`
+  if (trigger.type === 'after') {
+    const on = trigger.on ?? 'success'
+    return on === 'any' ? `after ${trigger.job}` : `after ${trigger.job} ${on}`
+  }
 
   const unit = UNIT_LABELS[trigger.unit] ?? trigger.unit
   // The singular drops the "s": "every minute", not "every 1 minutes".

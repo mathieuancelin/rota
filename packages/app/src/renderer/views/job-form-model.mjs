@@ -71,18 +71,22 @@ export function deletePath(target, path) {
 
 export const TRIGGER_SEEDS = {
   interval: {
-    drop: ['expression', 'token', 'keyword', 'event'],
+    drop: ['expression', 'token', 'keyword', 'event', 'job', 'on'],
     seed: { every: 15, unit: 'minutes' },
   },
   cron: {
-    drop: ['every', 'unit', 'token', 'keyword', 'event'],
+    drop: ['every', 'unit', 'token', 'keyword', 'event', 'job', 'on'],
     seed: { expression: '0 9 * * 1-5' },
   },
-  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event'], seed: {} },
-  discord: { drop: ['every', 'unit', 'expression', 'token', 'event'], seed: { keyword: '' } },
+  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event', 'job', 'on'], seed: {} },
+  discord: { drop: ['every', 'unit', 'expression', 'token', 'event', 'job', 'on'], seed: { keyword: '' } },
   power: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'job', 'on'],
     seed: { event: 'wake' },
+  },
+  after: {
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event'],
+    seed: { job: '', on: 'success' },
   },
 }
 

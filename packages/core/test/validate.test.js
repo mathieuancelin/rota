@@ -538,3 +538,35 @@ test('chatting from Discord requires control', () => {
   })
   assert.equal(accepte.ok, true, accepte.errors?.join(' | '))
 })
+
+test('a schema default never leaks a field into a trigger of another type', () => {
+  // `on` once carried "default": "success" in the schema. ajv fills defaults in
+  // for every declared property of the object it is validating, so every
+  // interval and cron trigger came back carrying an `on` — which the checks
+  // below then rejected as belonging to the after type. 130 tests said so at
+  // once; this one says why.
+  const result = validateJob({
+    id: 'x',
+    name: 'X',
+    triggers: [
+      { type: 'interval', every: 5, unit: 'minutes' },
+      { type: 'cron', expression: '0 9 * * *' },
+      { type: 'webhook' },
+      { type: 'power', event: 'wake' },
+    ],
+    runner: { type: 'shell', script: '/x.sh' },
+  })
+
+  assert.equal(result.ok, true, JSON.stringify(result.errors))
+  const foreign = ['job', 'on', 'event', 'keyword', 'token', 'expression', 'every', 'unit']
+  for (const [index, trigger] of result.job.triggers.entries()) {
+    const kept = foreign.filter((field) => trigger[field] !== undefined)
+    const allowed = {
+      interval: ['every', 'unit'],
+      cron: ['expression'],
+      webhook: [],
+      power: ['event'],
+    }[trigger.type]
+    assert.deepEqual(kept.sort(), allowed.sort(), `trigger ${index} (${trigger.type})`)
+  }
+})

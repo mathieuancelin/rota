@@ -141,7 +141,8 @@ any type of job takes any kind of trigger, and it takes as many as it likes.
   { "type": "cron", "expression": "0 9 * * 1-5" },
   { "type": "webhook" },
   { "type": "discord", "keyword": "deploy" },
-  { "type": "power", "event": "unlock" }
+  { "type": "power", "event": "unlock" },
+  { "type": "after", "job": "backup", "on": "failure" }
 ]
 ```
 
@@ -179,6 +180,31 @@ job started as the machine leaves is a job that gets killed halfway through.
 Both work the same under `rotad`, which has no `powerMonitor` — it infers the
 wake from the gap between two timer ticks and reads the screen lock from
 `logind`. Same trigger, same behaviour, whichever is running the engine.
+
+#### `after`: when another job has finished
+
+```json
+{ "type": "after", "job": "backup", "on": "failure" }
+```
+
+`on` is `success` by default, and that default is a decision rather than an
+oversight: "after the backup, upload it" almost never means "upload whatever a
+failed backup left behind". `failure` covers a run that failed and one that
+timed out. `any` covers those and success.
+
+Two endings are never reacted to. A run skipped because the job was already
+running did not happen, so nothing follows it. A run somebody cancelled by hand
+already had their attention, and reacting would be talking over them.
+
+**One hop, never a chain.** A job started by an `after` trigger does not itself
+start others. That makes cycles impossible by construction rather than by a
+depth limit nobody would ever tune, and it costs nothing: chaining steps in
+order is what the [`workflow`](#chaining-jobs-workflow) runner is for, and it
+does it as *one* execution with one history entry and one notification. `after`
+is the other thing — reacting to a job you did not start.
+
+A job cannot wait for itself; the editor refuses it as it is typed, since both
+names are in the same file.
 
 > **Coming from an earlier version.** Jobs used to carry a single `schedule` object.
 > Rota rewrites them into `triggers` on first launch and keeps the original as

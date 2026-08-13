@@ -17,6 +17,10 @@ const { EventEmitter } = require('node:events')
 const logger = require('../lib/logger')
 const { isTimed, nextRunAt, missedOccurrences, timeoutFor } = require('./next-run')
 
+// The label an `after` run carries in the history, and the mark that stops it
+// from starting anything in turn.
+const AFTER_TRIGGER = 'after'
+
 // A timer key designates a trigger, not a job. The index is enough: it is stable
 // as long as the file does not change, and a file that changes goes back
 // through sync() anyway.
@@ -62,6 +66,8 @@ class Scheduler extends EventEmitter {
     this.locked = false
     /** Power triggers the lock held back, replayed when the session comes back. */
     this.pendingPower = new Map()
+    // Bound once so that stop() can take it off again.
+    this.onFinished = (execution) => this.#onFinished(execution)
   }
 
   isPaused() {
@@ -96,6 +102,12 @@ class Scheduler extends EventEmitter {
   /** Starts the timers and fires the jobs marked runOnStartup. */
   async start() {
     this.started = true
+
+    // Subscribed here rather than in the composition root: what starts a job
+    // belongs to the scheduler, and an `after` trigger is one more thing that
+    // starts a job.
+    this.runner.on?.('finished', this.onFinished)
+
     this.sync()
 
     if (this.isPaused()) {
@@ -111,8 +123,44 @@ class Scheduler extends EventEmitter {
 
   stop() {
     this.started = false
+    this.runner.off?.('finished', this.onFinished)
     for (const { timer } of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
+  }
+
+  /**
+   * A job has ended: start whatever was waiting for it.
+   *
+   * **One hop, never a chain.** A job started this way does not itself start
+   * others. That kills every cycle by construction rather than by a depth
+   * counter nobody would tune, and it costs nothing real: chaining is what the
+   * workflow runner is for, and it does it in one execution with one history
+   * entry. `after` is for reacting to something you did not start.
+   */
+  #onFinished = (execution) => {
+    if (!this.started || this.isPaused()) return
+    if (execution.trigger === AFTER_TRIGGER) return
+
+    // Neither of these is an ending to react to: one never ran, and the other
+    // was stopped by somebody who was already watching.
+    if (execution.status === 'skipped-already-running' || execution.status === 'cancelled') return
+
+    const succeeded = execution.status === 'success'
+    for (const job of this.store.getJobs()) {
+      if (!job.enabled || job.id === execution.jobId) continue
+      if (this.#deferredForLock(job)) continue
+
+      const wants = (job.triggers ?? []).some((trigger) => {
+        if (trigger.type !== 'after' || trigger.enabled === false) return false
+        if (trigger.job !== execution.jobId) return false
+        const on = trigger.on ?? 'success'
+        return on === 'any' || (on === 'success') === succeeded
+      })
+      if (!wants) continue
+
+      logger.info(`${job.id}: after ${execution.jobId} ${execution.status}`)
+      this.#trigger(job, AFTER_TRIGGER)
+    }
   }
 
   /** Recomputes every timer from the current state. Idempotent. */

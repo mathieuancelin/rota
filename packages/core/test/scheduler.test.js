@@ -3,6 +3,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
+const { EventEmitter } = require('node:events')
+
 const { Scheduler } = require('../src/scheduler')
 
 const MINUTE = 60_000
@@ -51,7 +53,8 @@ function harness(jobs, { paused = false, lastRuns = {}, runDurationMs = 0 } = {}
       lastRuns[id] = run
     },
   }
-  const runner = {
+  const runner = new EventEmitter()
+  Object.assign(runner, {
     isRunning: (id) => (running.get(id) ?? 0) > 0,
     run: async (job, options) => {
       if (!job.execution.allowConcurrentRuns && runner.isRunning(job.id)) {
@@ -70,9 +73,11 @@ function harness(jobs, { paused = false, lastRuns = {}, runDurationMs = 0 } = {}
         status: 'success',
         durationMs: runDurationMs,
       }
+      const execution = { jobId: job.id, status: 'success', trigger: options.trigger }
+      runner.emit('finished', execution)
       return { status: 'success' }
     },
-  }
+  })
 
   const scheduler = new Scheduler({ store, state, runner })
   return { scheduler, runs, skipped, runner, setPaused: (value) => (paused = value), lastRuns }
@@ -801,4 +806,144 @@ test('a job with both a schedule and a power trigger is not run twice at once', 
   scheduler.handleWake()
   // The catch-up fires it; the power trigger must not add a second run on top.
   assert.equal(runs.length, 1, `expected one run, got ${JSON.stringify(runs)}`)
+})
+
+// --- the after trigger ----------------------------------------------------------
+//
+// Reacting to another job's ending. The rule that shapes everything here is one
+// hop: a job started this way starts nothing itself, which is what makes cycles
+// impossible without a depth counter nobody would tune.
+
+const afterJob = (id, job, on) =>
+  makeJob(id, { triggers: [{ type: 'after', job, ...(on ? { on } : {}) }] })
+
+/** What the runner announces when a job ends, for the cases a run cannot make. */
+const ended = (scheduler, runner, jobId, status, trigger = 'schedule') =>
+  runner.emit('finished', { jobId, status, trigger })
+
+test('a job waiting on another runs when it succeeds', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('upload', 'backup')])
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'success')
+  assert.deepEqual(runs, [{ jobId: 'upload', trigger: 'after' }])
+})
+
+test('success is the default, so a failure starts nothing', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('upload', 'backup')])
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'failed')
+  assert.deepEqual(runs, [], 'uploading what a failed backup produced is the footgun')
+})
+
+test('on failure covers both a failure and a timeout', async () => {
+  for (const status of ['failed', 'timed-out']) {
+    const { scheduler, runs, runner } = harness([
+      makeJob('backup'),
+      afterJob('warn', 'backup', 'failure'),
+    ])
+    await scheduler.start()
+    runs.length = 0
+
+    ended(scheduler, runner, 'backup', status)
+    assert.deepEqual(runs, [{ jobId: 'warn', trigger: 'after' }], `for ${status}`)
+  }
+})
+
+test('on any covers success and failure alike', async () => {
+  for (const status of ['success', 'failed', 'timed-out']) {
+    const { scheduler, runs, runner } = harness([
+      makeJob('backup'),
+      afterJob('log', 'backup', 'any'),
+    ])
+    await scheduler.start()
+    runs.length = 0
+
+    ended(scheduler, runner, 'backup', status)
+    assert.equal(runs.length, 1, `for ${status}`)
+  }
+})
+
+test('a run that never happened is not an ending', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('log', 'backup', 'any')])
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'skipped-already-running')
+  assert.deepEqual(runs, [], 'it did not run, so nothing follows it')
+})
+
+test('a run somebody stopped by hand starts nothing', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('log', 'backup', 'any')])
+  await scheduler.start()
+  runs.length = 0
+
+  // Whoever pressed stop was already watching; reacting would be talking over
+  // them.
+  ended(scheduler, runner, 'backup', 'cancelled')
+  assert.deepEqual(runs, [])
+})
+
+test('one hop, never a chain', async () => {
+  const { scheduler, runs, runner } = harness([
+    makeJob('a'),
+    afterJob('b', 'a', 'any'),
+    afterJob('c', 'b', 'any'),
+  ])
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'a', 'success')
+  // b runs, and b's own ending — carrying the `after` label — starts nothing.
+  assert.deepEqual(runs, [{ jobId: 'b', trigger: 'after' }])
+})
+
+test('two jobs waiting on each other cannot loop', async () => {
+  const { scheduler, runs, runner } = harness([afterJob('a', 'b', 'any'), afterJob('b', 'a', 'any')])
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'a', 'success')
+  // b runs once. Its ending is an `after` ending, so it does not start a back.
+  assert.deepEqual(runs, [{ jobId: 'b', trigger: 'after' }])
+})
+
+test('a paused scheduler reacts to nothing', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('upload', 'backup')], {
+    paused: true,
+  })
+  await scheduler.start()
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'success')
+  assert.deepEqual(runs, [])
+})
+
+test('a disabled job and a disabled trigger are both ignored', async () => {
+  const { scheduler, runs, runner } = harness([
+    makeJob('backup'),
+    afterJob('off', 'backup', 'any'),
+    makeJob('muted', { triggers: [{ type: 'after', job: 'backup', on: 'any', enabled: false }] }),
+    afterJob('live', 'backup', 'any'),
+  ])
+  await scheduler.start()
+  // The one that must be skipped is disabled after the harness built it.
+  scheduler.store.getJobs()[1].enabled = false
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'success')
+  assert.deepEqual(runs, [{ jobId: 'live', trigger: 'after' }])
+})
+
+test('a stopped scheduler has let go of the runner', async () => {
+  const { scheduler, runs, runner } = harness([makeJob('backup'), afterJob('upload', 'backup')])
+  await scheduler.start()
+  scheduler.stop()
+  runs.length = 0
+
+  ended(scheduler, runner, 'backup', 'success')
+  assert.deepEqual(runs, [])
 })
