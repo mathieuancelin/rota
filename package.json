@@ -11,6 +11,7 @@
     "node": ">=22.12"
   },
   "scripts": {
+    "rebuild": "node scripts/build.js",
     "start": "npm start --workspace rota",
     "build": "npm run build --workspace rota",
     "package": "npm run package --workspace rota",

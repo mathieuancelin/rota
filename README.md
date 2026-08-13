@@ -192,6 +192,16 @@ it, and a second refuses by name and by process id — an application and a daem
 the same directory would otherwise run every job twice, with nothing to tell you but
 a job that ran twice at three in the morning.
 
+### Building it yourself
+
+```bash
+nvm use && npm run rebuild
+```
+
+One command: dependencies, both test suites, the renderer, the two binaries and
+the application, in that order, with what it produced listed at the end. See
+[Inside it](docs/internals.md#development) for the steps on their own.
+
 ## Scope and non-goals
 
 Rota schedules local jobs on one machine, for one user. It deliberately does not

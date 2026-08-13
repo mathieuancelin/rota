@@ -103,12 +103,32 @@ the install too: Electron's postinstall requires `@electron/get`, which is ESM.
 
 ```bash
 nvm use            # 22.16.0 — the shell's default Node 18 produces phantom failures
+npm run rebuild    # all of the below, in order, from wherever you are
+```
+
+`rebuild` is the one to reach for after a pull or when something is behaving
+oddly. It checks Node's version before doing an hour of work rather than after,
+installs, runs both suites, builds the renderer, compiles the binaries for this
+machine, packages the application, and prints what it produced. `--clean` starts
+from an empty tree, `--skip-tests` when you have just run them, `--all-targets`
+for the four binary targets rather than this one; `--help` lists the rest.
+
+It deliberately does not run `icons` or `screenshots`. Both rewrite committed
+files, both answer "the design changed" rather than "build it", and a rebuild
+that quietly rewrote either would make every one of them look like a diff.
+
+The steps it strings together, if you want one of them on its own:
+
+```bash
 bun install        # or npm install; both resolve the workspace
 npm start          # Vite dev server + Electron, hot reload on the renderer
 npm test           # every package's suite, node:test, no framework
 npm run test:bun   # the engine again, under the runtime the daemon ships as
+npm run build      # the renderer, into packages/app/dist
 npm run compile    # rotad and rotactl, four targets
 npm run package    # .app + ad-hoc signed .dmg, with a rotad beside it
+npm run icons      # regenerate the icon sets (committed)
+npm run screenshots # retake the documentation screenshots (committed)
 ```
 
 A package's own suite runs from its own directory:
