@@ -17,6 +17,7 @@
     "icons": "npm run icons --workspace rota",
     "test": "npm test --workspaces --if-present",
     "compile": "node scripts/compile.js",
-    "test:bun": "node scripts/test-bun.js"
+    "test:bun": "node scripts/test-bun.js",
+    "screenshots": "npm run screenshots --workspace rota"
   }
 }

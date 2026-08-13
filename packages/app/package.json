@@ -14,6 +14,7 @@
     "start": "node scripts/dev.js",
     "build": "vite build",
     "icons": "node scripts/generate-icons.js && iconutil -c icns assets/app/icon.iconset -o build/icon.icns",
+    "screenshots": "node scripts/screenshots.js",
     "package": "npm run build && node scripts/bundle-daemon.js && electron-builder --mac --arm64",
     "test": "node --test test/*.test.js"
   },
