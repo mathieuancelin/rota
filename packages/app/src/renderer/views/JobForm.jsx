@@ -152,6 +152,20 @@ const UNITS = [
   ['days', 'days'],
 ]
 
+// The two returns a job can wait for. Locking and going to sleep are absent on
+// purpose: a job started as the machine leaves is a job that gets killed
+// halfway through.
+const POWER_EVENTS = [
+  ['wake', 'the machine wakes'],
+  ['unlock', 'the screen is unlocked'],
+]
+
+const AFTER_OUTCOMES = [
+  ['success', 'it succeeded'],
+  ['failure', 'it failed or timed out'],
+  ['any', 'it ended, either way'],
+]
+
 // --- fields ------------------------------------------------------------------------
 
 function Field({ label, hint, children, wide = false }) {
@@ -470,6 +484,8 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
             <option value="cron">Cron expression</option>
             <option value="webhook">Webhook</option>
             <option value="discord">Discord keyword</option>
+            <option value="power">Machine wakes or unlocks</option>
+            <option value="after">Another job finished</option>
           </select>
         </Field>
         <button type="button" className="link" onClick={onRemove} title="Remove this trigger">
@@ -496,6 +512,25 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
       )}
       {type === 'discord' && (
         <Text {...props} path={at('keyword')} label="Keyword" placeholder="deploy" />
+      )}
+      {type === 'power' && (
+        <>
+          <Select {...props} path={at('event')} label="When" options={POWER_EVENTS} />
+          <Note>
+            A Mac wakes at the lock screen, before anybody has typed anything. Pick the
+            unlock when the job needs the keychain, the network as you left it, or you.
+          </Note>
+        </>
+      )}
+      {type === 'after' && (
+        <>
+          <Text {...props} path={at('job')} label="After the job" placeholder="backup" />
+          <Select {...props} path={at('on')} label="When" options={AFTER_OUTCOMES} />
+          <Note>
+            A job started this way starts no others in turn — chaining steps in order is
+            what a workflow job is for. A job cannot wait for itself.
+          </Note>
+        </>
       )}
 
       <Toggle {...props} path={at('enabled')} label="Trigger enabled" />

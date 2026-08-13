@@ -427,3 +427,59 @@ test("the form reads the schema's explanations right into a step", () => {
     25,
   )
 })
+
+// The trigger dropdown is written by hand: those <option> elements are not
+// generated from the schema. Adding `power` to the schema, to the validator and
+// to TRIGGER_SEEDS was not enough — the type validated, the engine fired it, and
+// the editor offered it nowhere. The test above catches a missing *field*
+// because it walks the schema's leaves; it does not walk into array items, so
+// nothing covered the list of types itself. This does.
+test('the form offers every trigger type the schema accepts', () => {
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'src', 'renderer', 'views', 'JobForm.jsx'),
+    'utf8',
+  )
+  const types = jobSchema.properties.triggers.items.properties.type.enum
+
+  for (const type of types) {
+    assert.ok(
+      source.includes(`<option value="${type}">`),
+      `"${type}" is accepted by the schema but has no entry in the trigger dropdown`,
+    )
+    assert.ok(TRIGGER_SEEDS[type], `"${type}" has no TRIGGER_SEEDS entry, so switching to it keeps the old type's fields`)
+  }
+
+  // And the other way: nothing offered that the schema would refuse.
+  const offered = [...source.matchAll(/<option value="([a-z-]+)">/g)].map((m) => m[1])
+  for (const type of Object.keys(TRIGGER_SEEDS)) {
+    assert.ok(types.includes(type), `"${type}" is seeded by the form but unknown to the schema`)
+    assert.ok(offered.includes(type), `"${type}" is seeded but not offered`)
+  }
+})
+
+test('switching to power or after leaves a trigger the schema accepts', () => {
+  for (const [type, expected] of [
+    ['power', ['event']],
+    ['after', ['job', 'on']],
+  ]) {
+    const job = baseJob()
+    job.triggers = [{ type: 'interval', every: 15, unit: 'minutes' }]
+    applyKindChange(job, ['triggers', 0], type, TRIGGER_SEEDS)
+    const trigger = job.triggers[0]
+
+    assert.equal(trigger.type, type)
+    for (const field of expected) {
+      assert.ok(field in trigger, `${type} should be seeded with ${field}`)
+    }
+    // The interval's own fields must be gone, not left dormant: the schema
+    // refuses them, and a job that will not save is worse than one that will
+    // not run.
+    assert.equal(trigger.every, undefined)
+    assert.equal(trigger.unit, undefined)
+
+    // `after` needs a real job name before it validates, which the form asks
+    // for; the point here is that nothing of the old type is left behind.
+    if (type === 'after') trigger.job = 'backup'
+    valid(job)
+  }
+})
