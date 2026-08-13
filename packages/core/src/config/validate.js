@@ -480,6 +480,7 @@ function describeTrigger(trigger) {
   if (trigger.type === 'cron') return `cron "${trigger.expression}"`
   if (trigger.type === 'webhook') return 'on webhook'
   if (trigger.type === 'discord') return `on “${trigger.keyword}”`
+  if (trigger.type === 'power') return `on ${trigger.event}`
 
   const unit = UNIT_LABELS[trigger.unit] ?? trigger.unit
   // The singular drops the "s": "every minute", not "every 1 minutes".

@@ -690,3 +690,115 @@ test('a job with no trigger at all stays startable by hand', async () => {
   assert.deepEqual(runs, [{ jobId: 'a', trigger: 'manual' }])
   scheduler.stop()
 })
+
+// --- the power trigger ---------------------------------------------------------
+//
+// A job that runs when the machine comes back. The distinction that costs
+// something is wake versus unlock: a Mac wakes at the lock screen, and
+// handleUnlock() delegates to handleWake() for the catch-up, so the naive
+// wiring runs a wake job twice for one lid-opening.
+
+const powerJob = (id, event, overrides = {}) =>
+  makeJob(id, { triggers: [{ type: 'power', event }], ...overrides })
+
+test('a wake job runs when the machine wakes', async () => {
+  const { scheduler, runs } = harness([powerJob('a', 'wake')])
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleWake()
+  assert.deepEqual(runs, [{ jobId: 'a', trigger: 'wake' }])
+})
+
+test('an unlock job does not run on a plain wake', async () => {
+  const { scheduler, runs } = harness([powerJob('a', 'unlock')])
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleWake()
+  assert.deepEqual(runs, [], 'the screen is still locked at that point')
+})
+
+test('one lid-opening runs a wake job once, not twice', async () => {
+  const { scheduler, runs } = harness([powerJob('a', 'wake')])
+  await scheduler.start()
+  runs.length = 0
+
+  // What actually happens: the machine wakes at the lock screen, then somebody
+  // types their password.
+  scheduler.handleWake()
+  scheduler.handleUnlock()
+
+  assert.deepEqual(runs, [{ jobId: 'a', trigger: 'wake' }])
+})
+
+test('unlocking runs the jobs waiting for it', async () => {
+  const { scheduler, runs } = harness([powerJob('a', 'unlock')])
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleUnlock()
+  assert.deepEqual(runs, [{ jobId: 'a', trigger: 'unlock' }])
+})
+
+test('a paused scheduler starts nothing on wake', async () => {
+  const { scheduler, runs } = harness([powerJob('a', 'wake')], { paused: true })
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleWake()
+  assert.deepEqual(runs, [])
+})
+
+test('a disabled job, and a disabled trigger, are both ignored', async () => {
+  const { scheduler, runs } = harness([
+    powerJob('off', 'wake', { enabled: false }),
+    makeJob('muted', { triggers: [{ type: 'power', event: 'wake', enabled: false }] }),
+    // Deliberately behind the two skipped ones: skipping must not mean
+    // stopping. Written this way because the first version of the loop said
+    // `break`, and a test with nothing after the disabled job passed anyway.
+    powerJob('live', 'wake'),
+  ])
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleWake()
+  assert.deepEqual(runs, [{ jobId: 'live', trigger: 'wake' }])
+})
+
+test('a job needing an unlocked session waits for the unlock, not the wake', async () => {
+  const job = powerJob('a', 'wake', {
+    execution: { ...makeJob('a').execution, requiresUnlockedSession: true },
+  })
+  const { scheduler, runs } = harness([job])
+  await scheduler.start()
+  scheduler.handleLock()
+  runs.length = 0
+
+  // Waking at the lock screen: the keychain is not available, so neither is
+  // the job.
+  scheduler.handleWake()
+  assert.deepEqual(runs, [], 'held back while the screen is locked')
+
+  scheduler.handleUnlock()
+  assert.deepEqual(runs, [{ jobId: 'a', trigger: 'wake' }], 'and it goes as soon as it can')
+})
+
+test('a job with both a schedule and a power trigger is not run twice at once', async () => {
+  const job = makeJob('a', {
+    triggers: [
+      { type: 'interval', every: 5, unit: 'minutes' },
+      { type: 'power', event: 'wake' },
+    ],
+  })
+  // Late enough that the catch-up wants it too.
+  const { scheduler, runs } = harness([job], {
+    lastRuns: { a: { at: new Date(Date.now() - HOUR).toISOString(), status: 'success' } },
+  })
+  await scheduler.start()
+  runs.length = 0
+
+  scheduler.handleWake()
+  // The catch-up fires it; the power trigger must not add a second run on top.
+  assert.equal(runs.length, 1, `expected one run, got ${JSON.stringify(runs)}`)
+})

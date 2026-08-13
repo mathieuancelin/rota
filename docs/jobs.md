@@ -140,7 +140,8 @@ any type of job takes any kind of trigger, and it takes as many as it likes.
   { "type": "interval", "every": 5, "unit": "minutes" },
   { "type": "cron", "expression": "0 9 * * 1-5" },
   { "type": "webhook" },
-  { "type": "discord", "keyword": "deploy" }
+  { "type": "discord", "keyword": "deploy" },
+  { "type": "power", "event": "unlock" }
 ]
 ```
 
@@ -154,6 +155,30 @@ normal shape of a job that exists to be called.
 
 Disabling the *job* stops every trigger, timer and webhook alike. Running it by hand
 stays available — that is the whole point of disabling it.
+
+#### `power`: when the machine comes back
+
+```json
+{ "type": "power", "event": "unlock" }
+```
+
+`wake` is the machine coming out of sleep. On a Mac that happens **at the lock
+screen**, before anybody has typed anything — which is why `unlock` exists
+separately, and why it is the one to use when the job needs the keychain, the
+network as you left it, or you. One lid-opening produces a wake and then an
+unlock; a `wake` job runs once, not twice.
+
+A job that asks for `wake` but declares `requiresUnlockedSession` is not dropped:
+it is held and started at the unlock, because on a laptop the screen is nearly
+always locked at the moment of waking, and silently never running is the wrong
+answer to a condition that normal.
+
+Two events, and only two. Locking and going to sleep are deliberately absent: a
+job started as the machine leaves is a job that gets killed halfway through.
+
+Both work the same under `rotad`, which has no `powerMonitor` — it infers the
+wake from the gap between two timer ticks and reads the screen lock from
+`logind`. Same trigger, same behaviour, whichever is running the engine.
 
 > **Coming from an earlier version.** Jobs used to carry a single `schedule` object.
 > Rota rewrites them into `triggers` on first launch and keeps the original as

@@ -50,12 +50,16 @@
           {
             "if": { "properties": { "type": { "const": "discord" } }, "required": ["type"] },
             "then": { "required": ["keyword"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "power" } }, "required": ["type"] },
+            "then": { "required": ["event"] }
           }
         ],
         "properties": {
           "type": {
-            "enum": ["interval", "cron", "webhook", "discord"],
-            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel."
+            "enum": ["interval", "cron", "webhook", "discord", "power"],
+            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked."
           },
           "enabled": {
             "type": "boolean",
@@ -83,6 +87,11 @@
             "description": "For the discord type: the word that starts this job when the bot is named with it — \"@Rota deploy\". It must not collide with a built-in command, nor with another job's keyword. Independent of `run <id>`, which keeps working for every job.",
             "pattern": "^[a-z0-9][a-z0-9_-]*$",
             "maxLength": 32
+          },
+          "event": {
+            "type": "string",
+            "enum": ["wake", "unlock"],
+            "description": "For the power type: which return to fire on. wake is the machine coming out of sleep — on a Mac that happens at the lock screen, before anybody has typed anything. unlock is the screen being opened, which is the one to use when the job needs the keychain, the network as you left it, or you. Locking and going to sleep are deliberately absent: a job started as the machine leaves is a job that gets killed halfway."
           }
         }
       }

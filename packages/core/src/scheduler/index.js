@@ -60,6 +60,8 @@ class Scheduler extends EventEmitter {
      * pushed here before the first arming.
      */
     this.locked = false
+    /** Power triggers the lock held back, replayed when the session comes back. */
+    this.pendingPower = new Map()
   }
 
   isPaused() {
@@ -283,9 +285,14 @@ class Scheduler extends EventEmitter {
 
   /**
    * After a wake-up: catches late jobs up once, then re-arms.
+   *
    * @param {number} now injectable for tests
+   * @param {{power?: string|null}} [options] which power trigger this return
+   *   counts as. Unlocking delegates here for the catch-up, and must not also
+   *   fire the jobs waiting on a wake: a Mac wakes at the lock screen, so one
+   *   lid-opening would otherwise run them twice.
    */
-  handleWake(now = Date.now()) {
+  handleWake(now = Date.now(), { power = 'wake' } = {}) {
     if (!this.started) return []
 
     const caughtUp = []
@@ -330,6 +337,10 @@ class Scheduler extends EventEmitter {
       this.#trigger(job, 'wake')
     }
 
+    // After the catch-up, and told what it already started: a job that was late
+    // and also asks to run on wake must not be started twice in the same second.
+    this.#firePower(power, new Set(caughtUp))
+
     this.sync()
     return caughtUp
   }
@@ -367,7 +378,67 @@ class Scheduler extends EventEmitter {
    */
   handleUnlock(now = Date.now()) {
     this.locked = false
-    return this.handleWake(now)
+    return this.handleWake(now, { power: 'unlock' })
+  }
+
+  /**
+   * Jobs asking to run when the machine comes back.
+   *
+   * Held to the same three rules as any other firing: a paused scheduler starts
+   * nothing, a disabled job stays disabled, and a job needing an unlocked
+   * session waits for the unlock rather than running against a locked keychain.
+   */
+  #firePower(event, alreadyRun = new Set()) {
+    if (!event || this.isPaused()) return
+
+    for (const job of this.store.getJobs()) {
+      if (!job.enabled) continue
+      const wants = (job.triggers ?? []).some(
+        (trigger) =>
+          trigger.type === 'power' && trigger.enabled !== false && trigger.event === event,
+      )
+      if (!wants) continue
+
+      // The catch-up got there first. Two triggers agreeing that now is the
+      // moment is one execution, not two.
+      if (alreadyRun.has(job.id)) {
+        logger.info(`${job.id}: on ${event}, already caught up`)
+        continue
+      }
+
+      if (this.#deferredForLock(job)) {
+        // It asked for the wake but needs the session open. Dropping it here
+        // would mean it never runs at all: a Mac wakes at the lock screen, so
+        // that condition is the normal one rather than the exception.
+        this.pendingPower.set(job.id, event)
+        logger.info(`${job.id}: on ${event}, waiting for the unlock`)
+        continue
+      }
+
+      logger.info(`${job.id}: on ${event}`)
+      this.#trigger(job, event)
+    }
+
+    if (!this.locked) this.#flushPendingPower(alreadyRun)
+  }
+
+  /** What the lock held back, once there is a session again. */
+  #flushPendingPower(alreadyRun = new Set()) {
+    if (this.pendingPower.size === 0) return
+
+    for (const [jobId, event] of [...this.pendingPower]) {
+      this.pendingPower.delete(jobId)
+      const job = this.store.getJob(jobId)
+      // Disabled, deleted or edited in the meantime: the promise was to run it
+      // when the session came back, not whatever took its place.
+      if (!job || !job.enabled || alreadyRun.has(jobId)) continue
+      if (this.#deferredForLock(job)) {
+        this.pendingPower.set(jobId, event)
+        continue
+      }
+      logger.info(`${jobId}: on ${event}, held since the lock`)
+      this.#trigger(job, event)
+    }
   }
 }
 
