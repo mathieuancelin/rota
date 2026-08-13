@@ -487,6 +487,7 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
             <option value="power">Machine wakes or unlocks</option>
             <option value="after">Another job finished</option>
             <option value="path">A file or directory changed</option>
+            <option value="once">Once, at a given moment</option>
           </select>
         </Field>
         <button type="button" className="link" onClick={onRemove} title="Remove this trigger">
@@ -534,6 +535,17 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
         </>
       )}
 
+      {type === 'once' && (
+        <>
+          <Text {...props} path={at('at')} label="At" placeholder="2026-09-01T09:00:00Z" />
+          <Note>
+            An ISO date and time. It runs once and never again. A moment already past
+            is not dropped — the job runs when Rota next gets the chance, which is what
+            “once at nine” means when the machine was off at nine. Delete the trigger to
+            cancel it.
+          </Note>
+        </>
+      )}
       {type === 'path' && (
         <>
           <Text {...props} path={at('path')} label="Path" placeholder="/Users/you/Downloads" />

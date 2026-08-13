@@ -264,6 +264,17 @@ function triggerErrors(job) {
     if (trigger.type !== 'path' && (trigger.path !== undefined || trigger.settleSeconds !== undefined)) {
       errors.push(`${field}: "path" and "settleSeconds" belong to the path type`)
     }
+    if (trigger.type !== 'once' && trigger.at !== undefined) {
+      errors.push(`${field}.at: belongs to the once type`)
+    }
+
+    // ajv has no date-time format without a plugin, and a moment nobody can
+    // parse is a trigger that silently never fires.
+    if (trigger.type === 'once' && !Number.isFinite(Date.parse(trigger.at))) {
+      errors.push(
+        `${field}.at: "${trigger.at}" is not a date and time — expected something like 2026-09-01T09:00:00Z`,
+      )
+    }
 
     // A job waiting for itself would either never start or never stop; the
     // identifier is right there in the same document, so it is caught here
@@ -497,6 +508,10 @@ function describeTrigger(trigger) {
   if (trigger.type === 'webhook') return 'on webhook'
   if (trigger.type === 'discord') return `on “${trigger.keyword}”`
   if (trigger.type === 'power') return `on ${trigger.event}`
+  if (trigger.type === 'once') {
+    const at = Date.parse(trigger.at)
+    return Number.isFinite(at) ? `once on ${new Date(at).toLocaleString('en-GB')}` : 'once'
+  }
   if (trigger.type === 'path') {
     const name = trigger.path.replace(/\/+$/, '').split('/').pop() || trigger.path
     return `on changes in ${name}`

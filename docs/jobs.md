@@ -143,7 +143,8 @@ any type of job takes any kind of trigger, and it takes as many as it likes.
   { "type": "discord", "keyword": "deploy" },
   { "type": "power", "event": "unlock" },
   { "type": "after", "job": "backup", "on": "failure" },
-  { "type": "path", "path": "/Users/you/Downloads" }
+  { "type": "path", "path": "/Users/you/Downloads" },
+  { "type": "once", "at": "2026-09-01T09:00:00Z" }
 ]
 ```
 
@@ -236,6 +237,25 @@ A path that does not exist is named in the log and does not stop the other
 watchers; it is retried whenever the configuration moves. And like every other
 trigger, a paused scheduler watches nothing, a disabled job watches nothing, and
 a job waiting on an unlocked session waits before it is watched.
+
+#### `once`: a single instant
+
+```json
+{ "type": "once", "at": "2026-09-01T09:00:00Z" }
+```
+
+An ISO date and time, with a `Z` or an offset. It runs once and never again.
+
+**A moment already past is not dropped.** "Run this once at nine" with the
+machine switched off at nine means running it when the machine comes back —
+which is the same rule the [catch-up](#what-is-handled) applies to every other
+timed trigger. Delete the trigger to cancel it.
+
+What marks it spent is the job having run *at or after* the instant it names.
+Nothing new is stored: that fact is already in `state.json`, so it survives a
+restart where a flag held in memory would not, and an execution from this
+morning says nothing about an instant this evening. A job that also carries a
+cron keeps it — spending the `once` disarms that trigger alone.
 
 > **Coming from an earlier version.** Jobs used to carry a single `schedule` object.
 > Rota rewrites them into `triggers` on first launch and keeps the original as

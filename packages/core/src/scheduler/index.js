@@ -260,6 +260,14 @@ class Scheduler extends EventEmitter {
   #targetFor(job, trigger, key) {
     const anchorAt = this.#anchorFor(key)
 
+    // `once` is the exception to everything below: whether it has happened is
+    // not a question about cadence, and a job allowed to run concurrently would
+    // otherwise never learn that its one instant is behind it.
+    if (trigger.type === 'once') {
+      const lastRun = this.state.getLastRun(job.id)
+      return nextRunAt(trigger, { lastRunAt: lastRun ? Date.parse(lastRun.at) : null, anchorAt })
+    }
+
     if (job.execution.allowConcurrentRuns) {
       // A regular cadence since the last start: that is precisely what
       // "concurrent executions allowed" means. Counting from the end would make
@@ -292,9 +300,12 @@ class Scheduler extends EventEmitter {
 
     const targetAt = this.#targetFor(job, trigger, key)
     if (targetAt === null) {
-      // A cron expression describing no reachable date: nothing to arm.
-      // Validation already refuses it, this case should not arise.
-      logger.warn(`${job.id}: no upcoming occurrence, trigger ${index} not scheduled`)
+      // A spent `once` is the normal end of its life, not a problem to report.
+      if (trigger.type !== 'once') {
+        // A cron expression describing no reachable date: nothing to arm.
+        // Validation already refuses it, this case should not arise.
+        logger.warn(`${job.id}: no upcoming occurrence, trigger ${index} not scheduled`)
+      }
       this.#disarm(key)
       return
     }

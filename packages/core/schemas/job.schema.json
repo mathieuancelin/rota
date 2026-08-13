@@ -62,12 +62,16 @@
           {
             "if": { "properties": { "type": { "const": "path" } }, "required": ["type"] },
             "then": { "required": ["path"] }
+          },
+          {
+            "if": { "properties": { "type": { "const": "once" } }, "required": ["type"] },
+            "then": { "required": ["at"] }
           }
         ],
         "properties": {
           "type": {
-            "enum": ["interval", "cron", "webhook", "discord", "power", "after", "path"],
-            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish. path waits for a file or a directory to change."
+            "enum": ["interval", "cron", "webhook", "discord", "power", "after", "path", "once"],
+            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish. path waits for a file or a directory to change. once names a single instant and is spent afterwards."
           },
           "enabled": {
             "type": "boolean",
@@ -105,6 +109,11 @@
             "type": "string",
             "description": "For the after type: the job whose end starts this one. A job cannot wait for itself, and a job started this way does not itself start others — `after` reacts, it does not chain. Chaining is what the workflow runner is for.",
             "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "at": {
+            "type": "string",
+            "description": "For the once type: the instant to run at, as an ISO 8601 date and time — \"2026-09-01T09:00:00Z\", or with an offset. It runs once and never again; the job having run at or after that instant is what marks it spent, so it survives a restart. An instant already past is not dropped: the job runs when Rota next has the chance, which is what \"once at nine\" means when the machine was off at nine. Delete the trigger to cancel it.",
+            "minLength": 10
           },
           "path": {
             "type": "string",

@@ -26,7 +26,7 @@ const MAX_TIMEOUT_MS = 2_147_483_647
 // The triggers the scheduler arms. The others — webhook, Discord — wait to be
 // come to: they have no occurrence to compute, and a job carrying only those
 // consumes no timer.
-const TIMED_TYPES = new Set(['interval', 'cron'])
+const TIMED_TYPES = new Set(['interval', 'cron', 'once'])
 
 const isTimed = (trigger) => TIMED_TYPES.has(trigger.type) && trigger.enabled !== false
 
@@ -50,6 +50,7 @@ function intervalMs(trigger) {
  */
 function nextRunAt(trigger, { lastRunAt = null, anchorAt }) {
   const reference = lastRunAt ?? anchorAt
+  if (trigger.type === 'once') return onceAt(trigger, lastRunAt)
   if (trigger.type === 'cron') {
     const fields = compileCron(trigger.expression)
     return fields ? nextOccurrence(fields, reference) : null
@@ -63,6 +64,10 @@ function nextRunAt(trigger, { lastRunAt = null, anchorAt }) {
  */
 function missedOccurrences(trigger, { lastRunAt = null, anchorAt, now }) {
   const reference = lastRunAt ?? anchorAt
+  if (trigger.type === 'once') {
+    const at = onceAt(trigger, lastRunAt)
+    return at !== null && at <= now ? 1 : 0
+  }
   if (trigger.type === 'cron') {
     const fields = compileCron(trigger.expression)
     return fields ? countOccurrences(fields, reference, now) : 0
@@ -71,6 +76,26 @@ function missedOccurrences(trigger, { lastRunAt = null, anchorAt, now }) {
   const period = intervalMs(trigger)
   if (elapsed < period) return 0
   return Math.floor(elapsed / period)
+}
+
+/**
+ * The instant a `once` trigger names, or null once it is spent.
+ *
+ * "Spent" is read from the job's last execution rather than from a flag of its
+ * own: if the job has run at or after the instant, that instant has been
+ * honoured. It survives a restart, which a flag in memory would not, and it
+ * needs nothing new in state.json.
+ *
+ * A moment already past is not dropped. "Run this once at nine" with the
+ * machine switched off at nine means running it when the machine comes back —
+ * that is what a person means, and it is the same rule the catch-up applies to
+ * every other timed trigger. Deleting the trigger is how you cancel it.
+ */
+function onceAt(trigger, lastRunAt) {
+  const at = Date.parse(trigger.at)
+  if (!Number.isFinite(at)) return null
+  if (lastRunAt !== null && lastRunAt >= at) return null
+  return at
 }
 
 /**
@@ -84,6 +109,7 @@ function timeoutFor(targetAt, now) {
 }
 
 module.exports = {
+  onceAt,
   UNIT_MS,
   MAX_TIMEOUT_MS,
   TIMED_TYPES,

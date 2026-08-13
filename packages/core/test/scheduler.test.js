@@ -1126,3 +1126,96 @@ test('a watcher does not report the state it found', async (t) => {
   await settled()
   assert.equal(runs.length, 1)
 })
+
+// --- the once trigger -----------------------------------------------------------
+//
+// One instant, then spent. What makes it worth its own tests is that "spent" is
+// read from the job's last execution rather than stored: it has to survive a
+// restart, it has to work on a job that also has a cron, and it must not be
+// fooled by a job allowed to run concurrently.
+
+const onceJob = (id, at, overrides = {}) =>
+  makeJob(id, { triggers: [{ type: 'once', at: new Date(at).toISOString() }], ...overrides })
+
+test('a moment still to come is armed, and reported as the next run', async () => {
+  const at = Date.now() + HOUR
+  const { scheduler, runs } = harness([onceJob('reminder', at)])
+  await scheduler.start()
+
+  assert.deepEqual(runs, [], 'not yet')
+  assert.equal(scheduler.nextRunByJob().get('reminder'), new Date(at).toISOString())
+  scheduler.stop()
+})
+
+test('a moment already past runs as soon as there is a chance', async () => {
+  // The machine was off at nine. Turning it on at ten is when it runs.
+  const { scheduler, runs } = harness([onceJob('reminder', Date.now() - HOUR)])
+  await scheduler.start()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  assert.equal(runs.length, 1, 'the instant it named has passed and it never ran')
+  scheduler.stop()
+})
+
+test('once it has run, it is spent — including across a restart', async () => {
+  const at = Date.now() - HOUR
+  const lastRuns = { reminder: { at: new Date(at + 1000).toISOString(), status: 'success' } }
+  const { scheduler, runs } = harness([onceJob('reminder', at)], { lastRuns })
+  await scheduler.start()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  // The state says the job ran after the instant, which is what "done" means.
+  // Nothing in memory carries it, so a restart reaches the same conclusion.
+  assert.deepEqual(runs, [])
+  assert.equal(scheduler.nextRunByJob().get('reminder') ?? null, null, 'and nothing is announced')
+  scheduler.stop()
+})
+
+test('an execution before the instant does not spend it', async () => {
+  const at = Date.now() + HOUR
+  const lastRuns = { reminder: { at: new Date().toISOString(), status: 'success' } }
+  const { scheduler } = harness([onceJob('reminder', at)], { lastRuns })
+  await scheduler.start()
+
+  assert.equal(
+    scheduler.nextRunByJob().get('reminder'),
+    new Date(at).toISOString(),
+    'having run this morning says nothing about an instant this evening',
+  )
+  scheduler.stop()
+})
+
+test('a job allowed to run concurrently still learns that its instant is behind it', async () => {
+  const at = Date.now() - HOUR
+  const job = onceJob('reminder', at, {
+    execution: { ...makeJob('x').execution, allowConcurrentRuns: true },
+  })
+  const lastRuns = { reminder: { at: new Date(at + 1000).toISOString(), status: 'success' } }
+  const { scheduler, runs } = harness([job], { lastRuns })
+  await scheduler.start()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  // Concurrency makes the other timed triggers count from a fixed anchor rather
+  // than from the last execution; `once` must not follow it there, or it would
+  // restart for ever.
+  assert.deepEqual(runs, [])
+  scheduler.stop()
+})
+
+test('a spent once alongside a cron leaves the cron alone', async () => {
+  const at = Date.now() - HOUR
+  const job = makeJob('mixed', {
+    triggers: [
+      { type: 'once', at: new Date(at).toISOString() },
+      { type: 'cron', expression: '0 9 * * *' },
+    ],
+  })
+  const lastRuns = { mixed: { at: new Date(at + 1000).toISOString(), status: 'success' } }
+  const { scheduler } = harness([job], { lastRuns })
+  await scheduler.start()
+
+  const next = scheduler.nextRunByJob().get('mixed')
+  assert.ok(next, 'the cron is still armed')
+  assert.ok(Date.parse(next) > Date.now(), 'and points at a future occurrence')
+  scheduler.stop()
+})

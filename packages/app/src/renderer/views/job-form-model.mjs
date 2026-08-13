@@ -71,25 +71,29 @@ export function deletePath(target, path) {
 
 export const TRIGGER_SEEDS = {
   interval: {
-    drop: ['expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds'],
+    drop: ['expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'],
     seed: { every: 15, unit: 'minutes' },
   },
   cron: {
-    drop: ['every', 'unit', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds'],
+    drop: ['every', 'unit', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'],
     seed: { expression: '0 9 * * 1-5' },
   },
-  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds'], seed: {} },
-  discord: { drop: ['every', 'unit', 'expression', 'token', 'event', 'job', 'on', 'path', 'settleSeconds'], seed: { keyword: '' } },
+  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'], seed: {} },
+  discord: { drop: ['every', 'unit', 'expression', 'token', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'], seed: { keyword: '' } },
   power: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'job', 'on', 'path', 'settleSeconds'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'job', 'on', 'path', 'settleSeconds', 'at'],
     seed: { event: 'wake' },
   },
   path: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'at'],
     seed: { path: '' },
   },
+  once: {
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds'],
+    seed: { at: '' },
+  },
   after: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'path', 'settleSeconds'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'path', 'settleSeconds', 'at'],
     seed: { job: '', on: 'success' },
   },
 }
