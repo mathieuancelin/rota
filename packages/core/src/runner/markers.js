@@ -37,6 +37,20 @@
 const MARKER = '::rota:changed::'
 const REPORT = '::rota:report::'
 const REPORT_DISCORD = '::rota:report_discord::'
+
+// The project was called TickTray, and a script written then emits
+// `::ticktray:changed::`. Those scripts are not in this repository — they are
+// somebody's, in their own configuration directory — and the rename is not a
+// reason for their notifications to stop without a word. The old prefix is
+// accepted wherever the new one is, exactly as the TICKTRAY_ environment
+// variables still are, and goes when they do.
+const LEGACY_PREFIX = '::ticktray:'
+const CURRENT_PREFIX = '::rota:'
+
+/** The line as it would read today, whichever spelling it arrived in. */
+function modernise(text) {
+  return text.includes(LEGACY_PREFIX) ? text.split(LEGACY_PREFIX).join(CURRENT_PREFIX) : text
+}
 const END = '::rota:end::'
 
 const OPENINGS = [
@@ -48,8 +62,10 @@ const OPENINGS = [
  * @param {string} stdout
  * @returns {{changed: true, message: string|null} | null}
  */
-function parseChangeMarker(stdout) {
-  if (typeof stdout !== 'string' || !stdout.includes(MARKER)) return null
+function parseChangeMarker(rawStdout) {
+  if (typeof rawStdout !== 'string') return null
+  const stdout = modernise(rawStdout)
+  if (!stdout.includes(MARKER)) return null
 
   // The last occurrence: the last state announced is the one that counts.
   let found = null
@@ -68,8 +84,9 @@ function parseChangeMarker(stdout) {
  * @param {string} stdout
  * @returns {Array<{destination: 'window'|'discord', title: string|null, markdown: string}>}
  */
-function parseReports(stdout) {
-  if (typeof stdout !== 'string') return []
+function parseReports(rawStdout) {
+  if (typeof rawStdout !== 'string') return []
+  const stdout = modernise(rawStdout)
   if (!stdout.includes(REPORT) && !stdout.includes(REPORT_DISCORD)) return []
 
   const reports = []
