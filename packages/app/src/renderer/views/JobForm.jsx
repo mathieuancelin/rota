@@ -716,9 +716,13 @@ function Step({ job, onChange, index, step, total }) {
 
 // --- formulaire -------------------------------------------------------------------------
 
-export default function JobForm({ job, onChange }) {
+export default function JobForm({ job, onChange, profiles = [] }) {
   const props = { job, onChange }
   const runnerType = job.runner?.type
+  // A job either writes its agent out here or names a reusable one. The two are
+  // edited in different places — the fields below belong to the written-out
+  // form, and a job that points at a profile has none of them to fill in.
+  const referenced = typeof job.runner?.agent === 'string'
   const triggers = Array.isArray(job.triggers) ? job.triggers : []
   const steps = stepsOf(job)
   const agentTools = job.runner?.agent?.tools?.enabled ?? schemaDefault(
@@ -828,7 +832,32 @@ export default function JobForm({ job, onChange }) {
         </Section>
       )}
 
-      {runnerType === 'agent' && (
+      {runnerType === 'agent' && referenced && (
+        <Section title="Agent">
+          <Select
+            {...props}
+            path={['runner', 'agent']}
+            label="Reusable agent"
+            options={[
+              ...profiles.map((profile) => [profile.id, `${profile.name} — ${profile.model}`]),
+              // Kept in the list even when it is not there: dropping it would
+              // silently rewrite the job to the first profile that happens to
+              // exist, which is not what a broken reference calls for.
+              ...(profiles.some((profile) => profile.id === job.runner.agent)
+                ? []
+                : [[job.runner.agent, `${job.runner.agent} — missing`]]),
+            ]}
+          />
+          <Text {...props} path={['runner', 'prompt']} label="Prompt" area rows={5} />
+          <Note>
+            The model, the instructions, the tools and the memory come from the agent, editable
+            under “Agents”. What this job wants different goes in{' '}
+            <code className="mono">agentOverrides</code>, in the “Definition” tab.
+          </Note>
+        </Section>
+      )}
+
+      {runnerType === 'agent' && !referenced && (
         <>
           <Section title="Agent — model">
             <Text {...props} path={['runner', 'agent', 'model']} label="Model" />

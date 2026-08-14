@@ -1,0 +1,415 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rota.local/schemas/profile.schema.json",
+  "title": "Rota agent profile",
+  "description": "A reusable agent: who performs the work, as opposed to the job, which says what is run. A job points at one with \"agent\": \"<id>\" and adds its own prompt. Everything here can be redeclared for a single job through that job's agentOverrides.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "model"
+  ],
+  "definitions": {
+    "toolName": {
+      "type": "string",
+      "enum": [
+        "fetch",
+        "exec",
+        "shell",
+        "file_read",
+        "file_list",
+        "file_write",
+        "file_del",
+        "todo",
+        "memory",
+        "report",
+        "report_discord",
+        "ask_user",
+        "confirm",
+        "signal_change",
+        "run_job",
+        "sub_agent",
+        "work_create",
+        "work_fail"
+      ]
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Schema reference, for completion in the editor."
+    },
+    "id": {
+      "type": "string",
+      "description": "Identifier of the profile, and the name of its file in profiles/. It is also the key of the memory this agent carries from one job to the next.",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Name shown in the interface.",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "description": "What this agent is for, in one line. Read by whoever wonders which profile to point a job at.",
+      "maxLength": 500
+    },
+    "systemPrompt": {
+      "type": "string",
+      "description": "Standing instructions. \"${defaults.system_prompt}\" inserts Rota's own — who you are, which tools exist, how to behave when nobody is watching — and that is the default value of this field. Write \"${defaults.system_prompt}\" followed by your own instructions to extend them, or leave the reference out to start from scratch. The job name, the trigger, the sandbox and the contents of memory are appended automatically.",
+      "default": "${defaults.system_prompt}",
+      "maxLength": 262144
+    },
+    "model": {
+      "type": "string",
+      "description": "Model name, as the API expects it. It must be able to call tools.",
+      "minLength": 1
+    },
+    "reasoningEffort": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Sent as \"reasoning_effort\". Absent, nothing is sent. A server that does not know the field sees it removed and the request replayed."
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "maxIterations": {
+      "type": "integer",
+      "description": "Maximum number of round trips with the model. Once reached, the execution fails rather than looping.",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 25
+    },
+    "api": {
+      "type": "object",
+      "description": "Connection to an OpenAI-compatible API. Ollama on localhost by default.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "description": "API root, without \"/chat/completions\".",
+          "minLength": 1,
+          "default": "http://127.0.0.1:11434/v1"
+        },
+        "headers": {
+          "type": "object",
+          "description": "Headers added to the request. Values accept ${VARIABLE} references, resolved at run time from the environment or from the .env file in the configuration directory: an API key does not have to live in clear text in the job definition.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Timeout of a single request to the model, distinct from the execution's overall timeout.",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 120
+        },
+        "extraBody": {
+          "type": "object",
+          "description": "Fields merged as-is into the request body, for whatever the server expects and Rota does not know about.",
+          "default": {}
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Tools made available to the model. Everything is denied except what is listed.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "enabled": {
+          "type": "array",
+          "description": "fetch: HTTP calls. exec: a command and its arguments, no shell. shell: a command line handed to sh -c. file_read, file_list, file_write, file_del: access to the working directory. todo: an in-memory task list. memory: persistent memory between executions — the system prompt lists its keys, the tools read and write the values. report: a markdown report window. report_discord: a report sent to the Discord webhook declared in the global settings. ask_user, confirm: blocking questions. signal_change: reports a real effect, for onChange notifications. run_job: triggers another Rota job, or its own after a delay. sub_agent: delegates a task to a second agent of this same job, which inherits the model and the tools and answers back. work_create: queues a piece of work for a job, to be handled later in an execution of its own. work_fail: gives up for good on the queue item being processed — claiming, starting and completing it are Rota's business, not the model's.",
+          "items": {
+            "$ref": "#/definitions/toolName"
+          },
+          "uniqueItems": true,
+          "default": [
+            "fetch",
+            "file_read",
+            "file_list",
+            "todo",
+            "memory",
+            "report"
+          ]
+        },
+        "fetch": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "allowHosts": {
+              "type": "array",
+              "description": "Allowed hosts. Empty, all of them are. A leading dot covers subdomains: \".example.com\".",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": []
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 10485760,
+              "default": 262144
+            }
+          }
+        },
+        "system": {
+          "type": "object",
+          "description": "Settings for exec and shell.",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Timeout of a command. Once exceeded, the process group is killed and the model is told.",
+              "minimum": 1,
+              "maximum": 3600,
+              "default": 120
+            },
+            "maxOutputBytes": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 10485760,
+              "default": 65536
+            }
+          }
+        },
+        "jobs": {
+          "type": "object",
+          "description": "Settings for run_job.",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "allow": {
+              "type": "array",
+              "description": "Jobs this agent is allowed to trigger. Empty, all of them are — including those that run system commands.",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": []
+            }
+          }
+        },
+        "subagents": {
+          "type": "object",
+          "description": "Settings for sub_agent. A sub-agent inherits everything else from this job: the model, the temperature, the API, the working directory, the memory and the container.",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "maxDepth": {
+              "type": "integer",
+              "description": "How far the delegation may go. 1, a sub-agent cannot delegate in turn — which is what stops a job that misunderstood its task from spawning a tree of them. 0 refuses the tool outright.",
+              "minimum": 0,
+              "maximum": 3,
+              "default": 1
+            },
+            "maxPerRun": {
+              "type": "integer",
+              "description": "How many sub-agents one execution may start in total, across the whole tree — not per agent.",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 3
+            },
+            "deny": {
+              "type": "array",
+              "description": "Tools withdrawn from sub-agents. Empty, a sub-agent has exactly what this job has. This is where you hand out a reader that cannot write, or keep run_job for yourself.",
+              "items": {
+                "$ref": "#/definitions/toolName"
+              },
+              "uniqueItems": true,
+              "default": []
+            },
+            "maxIterations": {
+              "type": "integer",
+              "description": "Turn budget of one sub-agent. Declare none and it inherits the job's — which is usually too generous for a task that was meant to be narrow.",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "maxReadBytes": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 10485760,
+              "default": 131072
+            }
+          }
+        },
+        "interaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Time left to the user to answer ask_user or confirm. Once exceeded, the question is abandoned and the agent carries on: a scheduled job must not stay blocked in front of an empty screen.",
+              "minimum": 5,
+              "maximum": 86400,
+              "default": 120
+            }
+          }
+        }
+      }
+    },
+    "mcp": {
+      "type": "array",
+      "description": "MCP servers whose tools join Rota's own. Their names are prefixed with the connector's — \"github__search\" — because two servers will happily expose the same name. A connector that fails to start is reported in the transcript without failing the execution.",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "transport"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "transport": {
+                  "const": "stdio"
+                }
+              },
+              "required": [
+                "transport"
+              ]
+            },
+            "then": {
+              "required": [
+                "command"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "transport": {
+                  "const": "http"
+                }
+              },
+              "required": [
+                "transport"
+              ]
+            },
+            "then": {
+              "required": [
+                "url"
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Prefix for this server's tools. Short, no spaces: it counts towards the 64 characters a tool name must not exceed.",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "maxLength": 32
+          },
+          "transport": {
+            "enum": [
+              "stdio",
+              "http"
+            ],
+            "description": "stdio starts the server as a child process and talks over its standard input and output. http talks to an already running \"Streamable HTTP\" server."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "command": {
+            "type": "string",
+            "description": "For stdio: the server executable. Started on the host, never inside the sandbox container.",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "environment": {
+            "type": "object",
+            "description": "For stdio: process variables, added to the usual allowlist. Values accept ${VARIABLE}.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
+          "url": {
+            "type": "string",
+            "description": "For http: the MCP endpoint, the one that answers POSTs.",
+            "minLength": 1
+          },
+          "headers": {
+            "type": "object",
+            "description": "For http: request headers. Values accept ${VARIABLE} — a token does not have to live in clear text in the definition.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "description": "Timeout of a call to the server, handshake included.",
+            "minimum": 1,
+            "maximum": 3600,
+            "default": 60
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": false,
+            "default": {},
+            "properties": {
+              "allow": {
+                "type": "array",
+                "description": "Tools kept, under their original name, without the prefix. Empty, all of them are.",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "default": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Persistent memory, in memory/<id>.mem.json. Its keys are listed in the system prompt at the start of every execution; the values are read with memory_read, so that what is remembered informs the agent without steering it.",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      }
+    }
+  }
+}

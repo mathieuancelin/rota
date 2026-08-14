@@ -57,6 +57,17 @@ const COMMANDS = [
     remote: true,
   },
   {
+    name: 'profiles',
+    argument: '[id]',
+    summary: 'the reusable agents, and which jobs lean on them',
+    detail:
+      'A profile says who does the work — model, instructions, tools, memory — ' +
+      'and a job points at one with "agent": "<id>" and adds its own prompt. ' +
+      'Named, one profile in full, ending with the jobs using it: the thing to ' +
+      'look at before changing a system prompt that several of them share.',
+    source: SOURCE.DISK,
+  },
+  {
     name: 'history',
     argument: '<id>',
     summary: 'past executions, newest first',

@@ -257,8 +257,11 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
     await history.prune(ids).catch((err) => logger.error('pruning history', err))
     await work.prune(ids).catch((err) => logger.error('pruning the work queues', err))
     await pruneInlineScripts(paths, ids).catch((err) => logger.error('pruning inline code', err))
+    // Both lists: a memory file is named after a profile as readily as after a
+    // job, and sweeping on the jobs alone would wipe every profile's memory on
+    // the next start.
     await agentMemory
-      .prune(paths.memoryDir, ids)
+      .prune(paths.memoryDir, ids, store.getProfiles().map((profile) => profile.id))
       .catch((err) => logger.error('pruning agent memory', err))
   }
 

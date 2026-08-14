@@ -84,7 +84,11 @@ async function createSession({
   const toolsByName = byName(tools)
   const definitions = toolDefinitions(tools)
 
-  const state = agent.memory.enabled ? await memory.load(paths.memoryDir, job.id) : memory.empty()
+  // The agent's memory, which is the profile's when the job names one: two jobs
+  // run by the same agent share what it has learnt rather than each finding it
+  // out again.
+  const memoryKey = memory.keyFor(job)
+  const state = agent.memory.enabled ? await memory.load(paths.memoryDir, memoryKey) : memory.empty()
   // Global memory is read, not written from here: it comes from the settings or
   // the file, and holds for every job. A job that disabled its memory receives
   // no more of it — the setting says "no memory".
@@ -161,7 +165,8 @@ async function createSession({
     triggers,
     fetchImpl,
     runCommand: environment.runCommand,
-    saveMemory: () => memory.save(paths.memoryDir, job.id, state),
+    saveMemory: () =>
+      memory.save(paths.memoryDir, memoryKey, state, { maxEntries: agent.memory.maxEntries }),
     signalChange: (message) => changes.push(message),
   }
 

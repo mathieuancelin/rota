@@ -1333,3 +1333,85 @@ button.danger:hover:not(:disabled) {
 .editor-tabs .tab .badge {
   margin-left: 6px;
 }
+
+
+/* --- Agents ----------------------------------------------------------------------
+
+   The list on the left, the file on the right, and who leans on it underneath:
+   the three things one arrives wanting to know about a reusable agent. */
+
+.profiles-split {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.profiles-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.profiles-list li + li .profile-row {
+  border-top: 1px solid var(--border);
+}
+
+.profile-row:hover {
+  background: var(--surface-alt);
+}
+
+.profile-row.active {
+  background: var(--surface-alt);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.profile-name {
+  font-weight: 600;
+}
+
+/* Tall enough to read a system prompt without scrolling every three lines, and
+   bounded so the jobs underneath stay on screen. */
+.profile-monaco {
+  height: 420px;
+  min-height: 160px;
+  resize: vertical;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.profile-detail h4 {
+  margin: 16px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.profile-users {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}

@@ -37,6 +37,7 @@ const { isSessionLocked } = require('./lib/session-lock')
 const { listTemplates, buildFromTemplate } = require('./config/templates')
 const { loadEnv, resolveReferences } = require('./config/env')
 const { migrateJob, migrateJobsDir } = require('./config/migrate')
+const { extractProfile } = require('./config/extract-profile')
 const { readLastLines, countLines } = require('./history/tail')
 const { Runner, STATUS, ENV_ALLOWLIST, describeFailure } = require('./runner')
 const { Scheduler } = require('./scheduler')
@@ -57,6 +58,7 @@ const {
   describeTriggers,
   validateConfig,
   validateJob,
+  validateProfile,
 } = require('./config/validate')
 
 module.exports = {
@@ -77,7 +79,9 @@ module.exports = {
   watchConfig,
   migrateJob,
   migrateJobsDir,
+  extractProfile,
   validateJob,
+  validateProfile,
   validateConfig,
   describeTrigger,
   describeTriggers,

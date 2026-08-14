@@ -52,6 +52,26 @@ const NOT_FOUND = {
   content: { 'application/json': { schema: ERROR_SCHEMA } },
 }
 
+const profileSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    model: { type: 'string' },
+    maxIterations: { type: 'integer' },
+    api: { type: 'object' },
+    tools: { type: 'object' },
+    mcp: { type: 'array', items: { type: 'object' } },
+    memory: { type: 'object' },
+    usedBy: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Jobs pointing at this profile — what to look at before changing it.',
+    },
+  },
+}
+
 const workItemSchema = {
   type: 'object',
   properties: {
@@ -133,6 +153,34 @@ const OPERATIONS = [
     tag: 'Scheduler',
     summary: 'Resume the scheduler',
     responses: { 200: json({ type: 'object', properties: { paused: { type: 'boolean' } } }, 'Resumed.') },
+  },
+  {
+    method: 'get',
+    path: '/api/profiles',
+    tag: 'Profiles',
+    summary: 'List the reusable agents',
+    description:
+      'Who does the work, as opposed to the jobs, which say what is run. Their system prompts are ' +
+      'not returned, for the same reason an agent job’s prompt is not.',
+    responses: {
+      200: json({ type: 'object', properties: { profiles: { type: 'array', items: profileSchema } } }, 'The profiles.'),
+    },
+  },
+  {
+    method: 'get',
+    path: '/api/profiles/{id}',
+    tag: 'Profiles',
+    summary: 'One reusable agent, and the jobs leaning on it',
+    parameters: [
+      {
+        name: 'id',
+        in: 'path',
+        required: true,
+        description: 'Profile identifier — the name of its file in profiles/, without the extension.',
+        schema: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
+      },
+    ],
+    responses: { 200: json(profileSchema, 'The profile.'), 404: NOT_FOUND },
   },
   {
     method: 'get',
@@ -399,6 +447,12 @@ function buildSpec(http = {}) {
     servers: [{ url: `http://${http.listen ?? '127.0.0.1'}:${http.port ?? 47823}` }],
     tags: [
       { name: 'Jobs', description: 'List, run, stop, enable, read back.' },
+      {
+        name: 'Profiles',
+        description:
+          'Reusable agents: who performs the work. Read-only here — a definition is a local file, ' +
+          'as a job is.',
+      },
       {
         name: 'Work',
         description:

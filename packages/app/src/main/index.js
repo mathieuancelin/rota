@@ -320,7 +320,10 @@ function wireEngine() {
  * window. "Cancel" is the default button: an unlucky press on Enter or Escape
  * destroys nothing.
  */
-async function confirmDestructive({ message, detail, confirmLabel }) {
+// The label defaults rather than arriving undefined: an undefined button label
+// builds a dialog whose only usable answer is Cancel, so the action silently
+// never happens and the interface looks like it is not refreshing.
+async function confirmDestructive({ message, detail, confirmLabel = 'Confirm' }) {
   const parent = context.window && !context.window.isDestroyed() ? context.window : null
   const options = {
     type: 'warning',

@@ -19,12 +19,28 @@ function deref(schema, node) {
   let current = node
   // A reference may designate another; the bound stops a circular schema making
   // the form go round in circles.
-  for (let hops = 0; current?.$ref && hops < 10; hops += 1) {
-    if (!current.$ref.startsWith('#/')) return null
-    current = current.$ref
-      .slice(2)
-      .split('/')
-      .reduce((target, key) => target?.[key], schema)
+  for (let hops = 0; current && hops < 10; hops += 1) {
+    if (current.$ref) {
+      if (!current.$ref.startsWith('#/')) return null
+      current = current.$ref
+        .slice(2)
+        .split('/')
+        .reduce((target, key) => target?.[key], schema)
+      continue
+    }
+    // A field that accepts more than one shape: the form follows the object.
+    // `runner.agent` is either written out in full or names a reusable profile,
+    // and it is the written-out one that has fields to draw — the reference is
+    // an identifier, which the form offers as a list instead.
+    if (Array.isArray(current.oneOf)) {
+      const written = current.oneOf.find(
+        (branch) => branch.$ref || branch.type === 'object' || branch.properties,
+      )
+      if (!written) break
+      current = written
+      continue
+    }
+    break
   }
   return current
 }

@@ -93,6 +93,13 @@ function buildSnapshot({
     hasUnacknowledgedError: recentErrors.some(
       (error) => !acknowledgedAt || Date.parse(error.at) > Date.parse(acknowledgedAt),
     ),
+    // Small, and read by the list, the job form's picker and the editor alike.
+    // Each carries the jobs leaning on it: that is what one checks before
+    // changing a system prompt several of them share.
+    profiles: store.getProfiles().map((profile) => ({
+      ...profile,
+      usedBy: store.jobsUsingProfile(profile.id),
+    })),
     issues: store.getIssues(),
     jobTemplates: listTemplates(),
     autostart: autostart ?? { supported: false, active: false, reason: null },

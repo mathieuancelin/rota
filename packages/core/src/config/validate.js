@@ -10,8 +10,11 @@ const Ajv = require('ajv')
 const { COMMANDS } = require('../discord/commands')
 const { parseCron } = require('../lib/cron')
 
+const { resolveJobAgents } = require('./resolve-agent')
+
 const jobSchema = require('../../schemas/job.schema.json')
 const configSchema = require('../../schemas/config.schema.json')
+const profileSchema = require('../../schemas/profile.schema.json')
 
 const ajv = new Ajv({
   allErrors: true,
@@ -22,6 +25,21 @@ const ajv = new Ajv({
 
 const compiledJob = ajv.compile(jobSchema)
 const compiledConfig = ajv.compile(configSchema)
+const compiledProfile = ajv.compile(profileSchema)
+
+/**
+ * The agent block on its own.
+ *
+ * `runner.agent` accepts a string as well as an object, which means a `oneOf` —
+ * and ajv ignores `default` inside one. Without this second pass an inline agent
+ * would come out of validation missing maxIterations, its tool list and the
+ * rest, which the whole codebase assumes a validated job carries. Both spellings
+ * therefore come through here, and leave complete.
+ */
+const compiledAgent = ajv.compile({
+  ...jobSchema.definitions.agent,
+  definitions: jobSchema.definitions,
+})
 
 const UNIT_LABELS = {
   seconds: 'seconds',
@@ -361,7 +379,7 @@ function referenceErrors(value, field) {
  * @param {unknown} raw JSON content already parsed
  * @returns {{ok: true, job: object} | {ok: false, errors: string[]}}
  */
-function validateJob(raw) {
+function validateJob(raw, { profiles = new Map() } = {}) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, errors: ['document root: a JSON object is expected'] }
   }
@@ -371,10 +389,68 @@ function validateJob(raw) {
     return { ok: false, errors: formatErrors(compiledJob.errors) }
   }
 
+  // Before the semantic checks, which read a complete agent — a baseUrl, a tool
+  // list — and would trip over the profile's fields not being there yet.
+  const resolved = resolveJobAgents(job, profiles)
+  if (!resolved.ok) return { ok: false, errors: resolved.errors }
+
+  const agentErrorsFromDefaults = applyAgentDefaults(job)
+  if (agentErrorsFromDefaults.length > 0) return { ok: false, errors: agentErrorsFromDefaults }
+
   const errors = semanticJobErrors(job)
   if (errors.length > 0) return { ok: false, errors }
 
   return { ok: true, job }
+}
+
+/**
+ * Fills in what the agent block did not say, and checks what it did.
+ *
+ * Runs over the job's own agent and over each of its workflow steps': a step is
+ * a runner like any other, and may name a profile just the same.
+ */
+function applyAgentDefaults(job) {
+  const errors = []
+  const runners = [{ runner: job.runner, field: 'runner' }]
+  for (const [index, step] of (job.runner.workflow?.steps ?? []).entries()) {
+    if (step.runner) {
+      runners.push({ runner: step.runner, field: `runner.workflow.steps.${index}.runner` })
+    }
+  }
+
+  for (const { runner, field } of runners) {
+    if (runner.type !== 'agent') continue
+    if (!compiledAgent(runner.agent)) {
+      errors.push(
+        ...formatErrors(compiledAgent.errors).map((message) => `${field}.agent.${message}`),
+      )
+    }
+  }
+  return errors
+}
+
+/**
+ * Validates a reusable agent profile.
+ * @returns {{ok: true, profile: object} | {ok: false, errors: string[]}}
+ */
+function validateProfile(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, errors: ['document root: a JSON object is expected'] }
+  }
+
+  const profile = structuredClone(raw)
+  if (!compiledProfile(profile)) {
+    return { ok: false, errors: formatErrors(compiledProfile.errors) }
+  }
+
+  // The same checks an inline agent gets — a wrong baseUrl is found on the first
+  // scheduled execution otherwise, often at night, often with nobody watching.
+  // The prompt is the one thing a profile does not carry, so it is lent one for
+  // the duration of the check.
+  const errors = agentErrors({ ...profile, prompt: 'x' }, 'profile')
+  if (errors.length > 0) return { ok: false, errors }
+
+  return { ok: true, profile }
 }
 
 /**
@@ -545,6 +621,7 @@ function describeTriggers(triggers) {
 
 module.exports = {
   validateJob,
+  validateProfile,
   validateConfig,
   describeTrigger,
   describeTriggers,

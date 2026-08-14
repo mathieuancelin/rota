@@ -7,6 +7,9 @@ import JobList from './views/JobList.jsx'
 import Settings from './views/Settings.jsx'
 import Work from './views/Work.jsx'
 
+// Monaco again: loaded on demand, for the same reason the editor is.
+const Profiles = lazy(() => import('./views/Profiles.jsx'))
+
 // Monaco weighs more than the rest of the interface put together. Loading it on
 // demand avoids paying for its parsing on every startup, for a view one only
 // opens occasionally.
@@ -16,6 +19,7 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'jobs', label: 'Jobs' },
   { id: 'work', label: 'Work' },
+  { id: 'agents', label: 'Agents' },
   { id: 'settings', label: 'Settings' },
 ]
 
@@ -94,6 +98,7 @@ export default function App() {
               running={state.runningExecutions.find(
                 (execution) => execution.jobId === route.jobId,
               )}
+              profiles={state.profiles ?? []}
               initialTab={route.tab}
               focusExecutionId={route.executionId}
               onBack={() => setRoute({ view: 'jobs', jobId: null, executionId: null })}
@@ -103,6 +108,12 @@ export default function App() {
 
         {route.view === 'work' && (
           <Work state={state} onOpenJob={(jobId) => setRoute(openJob(jobId))} />
+        )}
+
+        {route.view === 'agents' && (
+          <Suspense fallback={<p className="muted">Loading…</p>}>
+            <Profiles state={state} onOpenJob={(jobId) => setRoute(openJob(jobId))} />
+          </Suspense>
         )}
 
         {route.view === 'settings' && <Settings state={state} />}

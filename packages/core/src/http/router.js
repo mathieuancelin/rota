@@ -126,6 +126,8 @@ async function handleApi(request, segments, deps, config) {
     return ok({ paused: segments[1] === 'pause' })
   }
 
+  if (segments[0] === 'profiles') return handleProfiles(request, segments.slice(1), deps)
+
   if (segments[0] === 'work') return handleWork(request, segments.slice(1), deps)
 
   if (segments[0] !== 'jobs') return NOT_FOUND
@@ -248,6 +250,41 @@ async function handleChat(request, job, { chat }) {
   if (!posted.ok) return json(422, { error: posted.error })
   if (!posted.turn.ok) return json(502, { error: posted.turn.error })
   return ok({ chatId: opened.chatId, reply: posted.turn.content })
+}
+
+// --- agent profiles --------------------------------------------------------------
+
+/**
+ * What a profile shows to the outside.
+ *
+ * Its instructions stay in, as an agent's prompt does on the jobs route: a
+ * system prompt is what somebody wrote to make this agent behave, and it is not
+ * what a caller needs to know which agent runs where.
+ */
+function describeProfile(profile, jobIds) {
+  const { systemPrompt: _systemPrompt, $schema: _schema, ...rest } = profile
+  return { ...rest, usedBy: jobIds }
+}
+
+function handleProfiles(request, segments, deps) {
+  const { store } = deps
+  if (request.method !== 'GET') return NOT_FOUND
+
+  if (segments.length === 0) {
+    return ok({
+      profiles: store
+        .getProfiles()
+        .map((profile) => describeProfile(profile, store.jobsUsingProfile(profile.id))),
+    })
+  }
+
+  if (segments.length === 1) {
+    const profile = store.getProfile(segments[0])
+    if (!profile) return NOT_FOUND
+    return ok(describeProfile(profile, store.jobsUsingProfile(profile.id)))
+  }
+
+  return NOT_FOUND
 }
 
 // --- work queues ----------------------------------------------------------------

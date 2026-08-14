@@ -32,6 +32,10 @@ const withEntries = (entries) => ({
   entries: Object.fromEntries(
     Object.entries(entries).map(([key, value]) => [key, { value, updatedAt: '2026-08-01T10:00:00.000Z' }]),
   ),
+  // A session that wrote these. `save` folds into the file rather than
+  // replacing it, and what it folds in is what was touched — a memory built by
+  // hand has to say as much, or it describes a session that wrote nothing.
+  touched: new Set(Object.keys(entries)),
 })
 
 // --- merging ------------------------------------------------------------------

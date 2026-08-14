@@ -11,7 +11,13 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { ipcMain, shell } = require('electron')
 
-const { agentMemory: memory, generateToken, logger } = require('@rota/core')
+const {
+  agentMemory: memory,
+  extractProfile,
+  generateToken,
+  logger,
+  validateProfile,
+} = require('@rota/core')
 
 const JOB_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -42,6 +48,11 @@ const CHANNELS = {
   WORK_RETRY: 'rota:work:retry',
   WORK_CANCEL: 'rota:work:cancel',
   WORK_DELETE: 'rota:work:delete',
+  PROFILES_READ: 'rota:profiles:read',
+  PROFILES_SAVE: 'rota:profiles:save',
+  PROFILES_CREATE: 'rota:profiles:create',
+  PROFILES_DELETE: 'rota:profiles:delete',
+  PROFILES_EXTRACT: 'rota:profiles:extract',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   // The HTTP server's token is drawn here rather than in the renderer: it is
@@ -81,6 +92,24 @@ function assertJobId(id) {
 function jobFilePath(store, id) {
   return path.join(store.paths.jobsDir, `${assertJobId(id)}.json`)
 }
+
+// A profile identifier composes a file path just as a job's does, and is checked
+// exactly as closely.
+function profileFilePath(store, id) {
+  return path.join(store.paths.profilesDir, `${assertJobId(id)}.json`)
+}
+
+/** What a profile looks like before anybody has said anything about it. */
+const blankProfile = (id) => ({
+  $schema: 'https://rota.local/schemas/profile.schema.json',
+  id,
+  name: id,
+  description: '',
+  systemPrompt: '${defaults.system_prompt}',
+  model: 'gemma4:latest',
+  tools: { enabled: ['fetch', 'file_read', 'file_list', 'todo', 'memory', 'report'] },
+  memory: { enabled: true },
+})
 
 function clampInteger(value, { min, max, fallback }) {
   if (!Number.isInteger(value)) return fallback
@@ -326,6 +355,122 @@ function registerIpc({
       return { ok: true }
     })
   }
+
+  /**
+   * Re-reads the configuration after we have written to it ourselves.
+   *
+   * The watcher would get there too, eventually — but it is there to notice what
+   * somebody else did in an editor, and depending on it to see our own writes
+   * makes the interface wait on a file-system notification that may be delayed,
+   * coalesced, or on some setups not delivered at all. Having just written the
+   * file, we know.
+   */
+  const refresh = async () => {
+    await store.reload()
+    publish()
+  }
+
+  // --- reusable agents -----------------------------------------------------------
+  //
+  // The same shape as the jobs above: the file is read raw, because that is what
+  // the editor edits, and written back after validation. The list itself is not
+  // here — it rides with the state, like the jobs'.
+
+  ipcMain.handle(CHANNELS.PROFILES_READ, async (_event, id) => {
+    try {
+      return { ok: true, content: await fs.readFile(profileFilePath(store, id), 'utf8') }
+    } catch (err) {
+      return { ok: false, errors: [`Read failed: ${err.message}`] }
+    }
+  })
+
+  ipcMain.handle(CHANNELS.PROFILES_SAVE, async (_event, id, content) => {
+    assertJobId(id)
+    if (typeof content !== 'string') return { ok: false, errors: ['Invalid content'] }
+
+    let parsed
+    try {
+      parsed = JSON.parse(content)
+    } catch (err) {
+      return { ok: false, errors: [`Invalid JSON: ${err.message}`] }
+    }
+
+    const result = validateProfile(parsed)
+    if (!result.ok) return result
+    if (result.profile.id !== id) {
+      return { ok: false, errors: [`id: "${result.profile.id}" does not match "${id}"`] }
+    }
+
+    // Written as it was typed, not as validation completed it: a file the user
+    // maintains by hand must not sprout thirty default values on every save.
+    await fs.writeFile(profileFilePath(store, id), `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+    logger.info(`profile ${id} saved from the interface`)
+    await refresh()
+    return { ok: true }
+  })
+
+  ipcMain.handle(CHANNELS.PROFILES_CREATE, async (_event, id) => {
+    if (typeof id !== 'string' || !JOB_ID.test(id)) {
+      return {
+        ok: false,
+        errors: [
+          'Invalid identifier: lowercase letters, digits, hyphen and underscore, ' +
+            'starting with a letter or a digit.',
+        ],
+      }
+    }
+
+    const file = profileFilePath(store, id)
+    try {
+      await fs.writeFile(file, `${JSON.stringify(blankProfile(id), null, 2)}\n`, {
+        encoding: 'utf8',
+        // The file system carries the exclusivity: unlike a check followed by a
+        // write, nothing can slip in between the two.
+        flag: 'wx',
+      })
+    } catch (err) {
+      if (err.code === 'EEXIST') return { ok: false, errors: [`A profile "${id}" already exists.`] }
+      return { ok: false, errors: [`Write failed: ${err.message}`] }
+    }
+    logger.info(`profile ${id} created from the interface`)
+    await refresh()
+    return { ok: true }
+  })
+
+  ipcMain.handle(CHANNELS.PROFILES_DELETE, async (_event, id) => {
+    assertJobId(id)
+    const profile = store.getProfile(id)
+    if (!profile) return { ok: false, errors: [`Unknown profile: ${id}`] }
+
+    // Said before it is done, because it is the one thing here that breaks
+    // something else: the jobs pointing at it stop resolving.
+    const users = store.jobsUsingProfile(id)
+    const confirmed = await confirmDestructive({
+      message: `Delete the "${profile.name}" agent?`,
+      detail:
+        users.length > 0
+          ? `${users.length} job(s) point at it — ${users.join(', ')} — and will stop running until ` +
+            'they are given another agent. Its memory is deleted with it.'
+          : 'No job points at it. Its memory is deleted with it.',
+      confirmLabel: 'Delete',
+    })
+    // Backing out is not a failure: said apart from the errors, so that the
+    // caller can stay silent about it and speak about the rest.
+    if (!confirmed) return { ok: false, cancelled: true }
+
+    await fs.rm(profileFilePath(store, id), { force: true })
+    logger.info(`profile ${id} deleted from the interface`)
+    await refresh()
+    return { ok: true }
+  })
+
+  ipcMain.handle(CHANNELS.PROFILES_EXTRACT, async (_event, jobId, profileId) => {
+    assertJobId(jobId)
+    assertJobId(profileId)
+    const result = await extractProfile({ paths: store.paths, jobId, profileId })
+    if (result.ok) await refresh()
+    return result
+  })
 
   ipcMain.handle(CHANNELS.ERRORS_CLEAR, async () => {
     state.clearErrors()

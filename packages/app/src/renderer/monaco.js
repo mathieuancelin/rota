@@ -50,9 +50,11 @@ import editorWorker from 'monaco-editor/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/language/json/json.worker?worker'
 
 import jobSchema from '@rota/core/schemas/job.schema.json'
+import profileSchema from '@rota/core/schemas/profile.schema.json'
 
-// Arbitrary but stable identifier: it is what links a model to the schema.
+// Arbitrary but stable identifiers: they are what link a model to a schema.
 const SCHEMA_URI = 'https://rota.local/schemas/job.schema.json'
+const PROFILE_SCHEMA_URI = 'https://rota.local/schemas/profile.schema.json'
 
 self.MonacoEnvironment = {
   getWorker(_workerId, label) {
@@ -72,7 +74,14 @@ jsonDefaults.setDiagnosticsOptions({
   schemaValidation: 'error',
   // No network access: the schema is supplied here, the CSP would block the rest.
   enableSchemaRequest: false,
-  schemas: [{ uri: SCHEMA_URI, fileMatch: ['*'], schema: jobSchema }],
+  // Two schemas now, and they must not overlap: a profile validated against the
+  // job schema would be underlined from its first line to its last. The patterns
+  // are matched on the file name, and `!` excludes — hence the job schema taking
+  // every .json except those a profile model is named after.
+  schemas: [
+    { uri: SCHEMA_URI, fileMatch: ['*.json', '!*.profile.json'], schema: jobSchema },
+    { uri: PROFILE_SCHEMA_URI, fileMatch: ['*.profile.json'], schema: profileSchema },
+  ],
 })
 
 monaco.editor.defineTheme('rota-dark', {
@@ -100,6 +109,11 @@ monaco.editor.defineTheme('rota-light', {
 /** Model URI specific to a job, so that fileMatch applies. */
 export function modelUri(jobId) {
   return monaco.Uri.parse(`inmemory://rota/${jobId}.json`)
+}
+
+/** The same for a profile, whose extension is what picks the other schema. */
+export function profileModelUri(id) {
+  return monaco.Uri.parse(`inmemory://rota/${id}.profile.json`)
 }
 
 /**

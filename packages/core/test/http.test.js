@@ -85,7 +85,27 @@ function makeWork(items = [workItem()]) {
   }
 }
 
-function makeDeps({ http = {}, jobs = [job()], envFile = '/nowhere/.env', work = makeWork() } = {}) {
+const agentProfile = (overrides = {}) => ({
+  id: 'sync-notes',
+  name: 'Sync agent',
+  description: '',
+  model: 'gemma4:latest',
+  systemPrompt: 'tu es un agent',
+  maxIterations: 25,
+  api: { baseUrl: 'http://127.0.0.1:11434/v1', headers: {}, timeoutSeconds: 120 },
+  tools: { enabled: ['file_read'] },
+  mcp: [],
+  memory: { enabled: true },
+  ...overrides,
+})
+
+function makeDeps({
+  http = {},
+  jobs = [job()],
+  envFile = '/nowhere/.env',
+  work = makeWork(),
+  profileList = [agentProfile()],
+} = {}) {
   const calls = []
   return {
     calls,
@@ -98,6 +118,9 @@ function makeDeps({ http = {}, jobs = [job()], envFile = '/nowhere/.env', work =
         calls.push(['setJobEnabled', id, enabled])
         return { ok: true }
       },
+      getProfiles: () => profileList,
+      getProfile: (id) => profileList.find((p) => p.id === id) ?? null,
+      jobsUsingProfile: (id) => (profileList.some((p) => p.id === id) ? ['sync-notes'] : []),
     },
     scheduler: {
       isPaused: () => false,

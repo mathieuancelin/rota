@@ -476,6 +476,57 @@ async function setEnabled(context, enabled) {
   )
 }
 
+// --- Reusable agents --------------------------------------------------------------
+
+/**
+ * The profiles, read off the files.
+ *
+ * A reading command, like `jobs` and `show`: the definitions are on disk, and
+ * asking what an agent is made of is exactly the sort of question one has with
+ * nothing running.
+ */
+async function profiles(context) {
+  const { argument, options, style, out, fail } = context
+  const store = await openStore(context.paths)
+
+  if (!argument) {
+    const all = store.getProfiles()
+    if (options.json) return out(all)
+
+    return out(
+      table(
+        ['ID', 'NAME', 'MODEL', 'TOOLS', 'USED BY'],
+        all.map((profile) => [
+          style.bold(profile.id),
+          profile.name,
+          profile.model,
+          String(profile.tools.enabled.length),
+          store.jobsUsingProfile(profile.id).join(', ') || style.dim('nobody'),
+        ]),
+        { style, empty: 'no profile in profiles/' },
+      ),
+    )
+  }
+
+  const profile = store.getProfile(argument)
+  if (!profile) return fail(`unknown profile: ${argument}`)
+  if (options.json) return out(profile)
+
+  const users = store.jobsUsingProfile(profile.id)
+  out(`${style.dim('profile ')} ${style.bold(profile.id)}`)
+  out(`${style.dim('name    ')} ${profile.name}`)
+  if (profile.description) out(`${style.dim('about   ')} ${profile.description}`)
+  out(`${style.dim('model   ')} ${profile.model} ${style.dim(`@ ${profile.api.baseUrl}`)}`)
+  out(`${style.dim('turns   ')} ${profile.maxIterations} at most`)
+  out(`${style.dim('memory  ')} ${profile.memory.enabled ? 'on' : 'off'}`)
+  out(`${style.dim('tools   ')} ${profile.tools.enabled.join(', ') || style.dim('none')}`)
+  if (profile.mcp.length > 0) {
+    out(`${style.dim('mcp     ')} ${profile.mcp.map((server) => server.name).join(', ')}`)
+  }
+  // What one comes to check before changing a system prompt.
+  out(`${style.dim('used by ')} ${users.join(', ') || style.dim('nobody')}`)
+}
+
 // --- The queues -----------------------------------------------------------------
 
 const WORK_STATUS_COLOUR = {
@@ -599,6 +650,7 @@ module.exports = {
   jobs,
   show,
   next,
+  profiles,
   work,
   history,
   logs,

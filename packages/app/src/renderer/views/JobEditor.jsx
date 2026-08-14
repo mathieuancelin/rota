@@ -98,7 +98,32 @@ const SOURCE_TABS = {
   ],
 }
 
-const sourceTabs = (parsed) => SOURCE_TABS[parsed?.runner?.type] ?? []
+/**
+ * The text tabs a definition earns.
+ *
+ * An agent job that points at a reusable agent is the exception: its prompt
+ * lives one level up, beside the reference, and its standing instructions are
+ * the profile's — editable under “Agents”, not here, where a copy of them could
+ * only diverge.
+ */
+function sourceTabs(parsed) {
+  const runner = parsed?.runner
+  if (runner?.type === 'agent' && typeof runner.agent === 'string') {
+    return [
+      {
+        ...SOURCE_TABS.agent[0],
+        path: ['runner', 'prompt'],
+        hint: (
+          <>
+            What this job asks of the “{runner.agent}” agent. Written back into{' '}
+            <code className="mono">runner.prompt</code> on save.
+          </>
+        ),
+      },
+    ]
+  }
+  return SOURCE_TABS[runner?.type] ?? []
+}
 
 /**
  * Tabs that do not depend on the declared type, and edit no text: they are
@@ -128,7 +153,15 @@ function parseOrNull(text) {
   }
 }
 
-export default function JobEditor({ jobId, job, running, initialTab, focusExecutionId, onBack }) {
+export default function JobEditor({
+  jobId,
+  job,
+  running,
+  profiles = [],
+  initialTab,
+  focusExecutionId,
+  onBack,
+}) {
   const container = useRef(null)
   const editor = useRef(null)
   const jsonModel = useRef(null)
@@ -155,6 +188,7 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
   const [errors, setErrors] = useState([])
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [extraction, setExtraction] = useState(null)
 
   /**
    * Full content to write: the source models win over the JSON. Only those that
@@ -205,6 +239,29 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
     if (result.ok) onBack()
     else if (!result.cancelled) setErrors(result.errors)
   }, [jobId, onBack])
+
+  /**
+   * Turns this job's inline agent into a reusable one, under the job's own name.
+   *
+   * The job keeps its prompt and gains a reference; the agent's memory travels
+   * with it, which is what makes the operation invisible from the outside — an
+   * extraction that quietly cost the agent months of observations would be worse
+   * than one that refused.
+   */
+  const extract = useCallback(async () => {
+    const result = await window.rota.extractProfile(jobId, jobId)
+    if (!result.ok) return setErrors(result.errors)
+    setErrors([])
+    setExtraction(
+      result.memoryMoved
+        ? `Extracted as “${result.profileId}”, memory moved with it.`
+        : `Extracted as “${result.profileId}”.`,
+    )
+    // The file changed under the editor: it is re-read rather than patched, so
+    // that what is on screen is what is on disk.
+    const read = await window.rota.readJob(jobId)
+    if (read.ok) jsonModel.current?.setValue(read.content)
+  }, [jobId])
 
   const openTab = useCallback(
     (next) => {
@@ -445,12 +502,20 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
         >
           Stop
         </button>
+        {/* Only where there is something to extract: an agent written out in
+            full. A job already pointing at a profile has nothing to give. */}
+        {job?.runner.type === 'agent' && !job.runner.agentProfile && (
+          <button disabled={dirty} onClick={extract} title="Make this agent reusable by other jobs">
+            Extract as agent
+          </button>
+        )}
         {/* The confirmation is a modal sheet from the main process: deletion is
             irreversible and takes the history with it. */}
         <button className="danger" onClick={remove} disabled={Boolean(running)}>
           Delete
         </button>
         {dirty && <span className="muted">Save before running.</span>}
+        {extraction && <span className="tone-ok">{extraction}</span>}
       </div>
 
       <LiveOutput execution={running} onOpenHistory={() => openTab('history')} />
@@ -508,7 +573,9 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
         {loading && <p className="muted">Loading…</p>}
       </div>
 
-      {tab === 'form' && form && <JobForm job={form} onChange={changeForm} />}
+      {tab === 'form' && form && (
+        <JobForm job={form} onChange={changeForm} profiles={profiles} />
+      )}
 
       {/* Unmounted on leaving the tab, unlike the conversation: there is nothing
           to lose there, and re-reading it is exactly what one comes to do. */}

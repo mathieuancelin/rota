@@ -31,6 +31,11 @@ const CHANNELS = {
   WORK_RETRY: 'rota:work:retry',
   WORK_CANCEL: 'rota:work:cancel',
   WORK_DELETE: 'rota:work:delete',
+  PROFILES_READ: 'rota:profiles:read',
+  PROFILES_SAVE: 'rota:profiles:save',
+  PROFILES_CREATE: 'rota:profiles:create',
+  PROFILES_DELETE: 'rota:profiles:delete',
+  PROFILES_EXTRACT: 'rota:profiles:extract',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   CONFIG_GENERATE_HTTP_TOKEN: 'rota:config:generateHttpToken',
@@ -100,6 +105,14 @@ contextBridge.exposeInMainWorld('rota', {
   retryWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_RETRY, id),
   cancelWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_CANCEL, id),
   deleteWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_DELETE, id),
+
+  /** Reusable agents. The list rides with the state; the file is read here. */
+  readProfile: (id) => ipcRenderer.invoke(CHANNELS.PROFILES_READ, id),
+  saveProfile: (id, content) => ipcRenderer.invoke(CHANNELS.PROFILES_SAVE, id, content),
+  createProfile: (id) => ipcRenderer.invoke(CHANNELS.PROFILES_CREATE, id),
+  deleteProfile: (id) => ipcRenderer.invoke(CHANNELS.PROFILES_DELETE, id),
+  extractProfile: (jobId, profileId) =>
+    ipcRenderer.invoke(CHANNELS.PROFILES_EXTRACT, jobId, profileId),
 
   setSchedulerPaused: (paused) => ipcRenderer.invoke(CHANNELS.SCHEDULER_SET_PAUSED, paused),
   patchConfig: (patch) => ipcRenderer.invoke(CHANNELS.CONFIG_PATCH, patch),

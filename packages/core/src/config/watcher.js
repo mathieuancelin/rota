@@ -1,6 +1,6 @@
 'use strict'
 
-// Watching config.json and jobs/.
+// Watching config.json, jobs/ and profiles/.
 //
 // We watch directories rather than files: editors often save by writing a
 // temporary file followed by a rename, which detaches a watcher placed on the
@@ -47,8 +47,14 @@ function watchConfig(paths, onChange, { debounceMs = DEBOUNCE_MS } = {}) {
     }
   }
 
+  const json = (name) => name.endsWith('.json') && !name.startsWith('.')
+
   watch(paths.root, (name) => name === 'config.json')
-  watch(paths.jobsDir, (name) => name.endsWith('.json') && !name.startsWith('.'))
+  watch(paths.jobsDir, json)
+  // A profile edited changes every job that points at it, and the store
+  // re-resolves them all on reload: watching here is what makes that happen
+  // without any notification of our own between the two.
+  watch(paths.profilesDir, json)
 
   return {
     close() {

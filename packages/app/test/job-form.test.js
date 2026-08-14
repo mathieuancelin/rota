@@ -249,12 +249,14 @@ test("the form's tool list covers exactly the schema's", () => {
   )
 
   // The runner lives under `definitions` since the workflow steps reuse it:
-  // `properties.runner` now carries only the reference. The tool names live
-  // there too, because `tools.subagents.deny` enumerates the same words and two
-  // copies of that list would drift.
+  // `properties.runner` now carries only the reference. The agent block moved
+  // there too, when `runner.agent` gained a second spelling — the identifier of
+  // a reusable profile — and became a oneOf with nothing to walk into. The tool
+  // names live there as well, because `tools.subagents.deny` enumerates the same
+  // words and two copies of that list would drift.
   const duSchema = jobSchema.definitions.toolName.enum
   assert.deepEqual(
-    jobSchema.definitions.runner.properties.agent.properties.tools.properties.enabled.items,
+    jobSchema.definitions.agent.properties.tools.properties.enabled.items,
     { $ref: '#/definitions/toolName' },
     'the tool list must stay a single reference',
   )
