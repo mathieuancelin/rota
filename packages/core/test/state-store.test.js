@@ -115,3 +115,41 @@ test('the writes are grouped rather than immediate', async (t) => {
   await store.flush()
   await fs.access(filePath)
 })
+
+test('clearing the recent failures empties the list and marks them seen', async (t) => {
+  const { filePath } = await freshState(t)
+  const store = new StateStore(filePath)
+  await store.load()
+
+  store.recordError({ jobId: 'backup', name: 'Backup', at: new Date().toISOString(), status: 'failed' })
+  store.recordError({ jobId: 'sync', name: 'Sync', at: new Date().toISOString(), status: 'timed-out' })
+  assert.equal(store.getRecentErrors().length, 2)
+
+  store.clearErrors()
+
+  assert.deepEqual(store.getRecentErrors(), [], 'the shortcut list is empty')
+  assert.ok(store.getAcknowledgedAt(), 'and the badge in the header goes with it')
+})
+
+test('clearing an already empty list changes nothing', async (t) => {
+  const { filePath } = await freshState(t)
+  const store = new StateStore(filePath)
+  await store.load()
+  const before = store.getAcknowledgedAt()
+
+  store.clearErrors()
+
+  assert.deepEqual(store.getRecentErrors(), [])
+  assert.equal(store.getAcknowledgedAt(), before, 'no write for nothing')
+})
+
+test('a failure after a clear comes back', async (t) => {
+  const { filePath } = await freshState(t)
+  const store = new StateStore(filePath)
+  await store.load()
+  store.recordError({ jobId: 'backup', name: 'Backup', at: new Date().toISOString(), status: 'failed' })
+  store.clearErrors()
+
+  store.recordError({ jobId: 'backup', name: 'Backup', at: new Date().toISOString(), status: 'failed' })
+  assert.equal(store.getRecentErrors().length, 1, 'clearing forgets, it does not mute')
+})

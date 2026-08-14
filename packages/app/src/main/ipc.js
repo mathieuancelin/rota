@@ -36,6 +36,7 @@ const CHANNELS = {
   HISTORY_READ: 'rota:history:read',
   OUTPUT_READ: 'rota:output:read',
   ERRORS_ACKNOWLEDGE: 'rota:errors:acknowledge',
+  ERRORS_CLEAR: 'rota:errors:clear',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   // The HTTP server's token is drawn here rather than in the renderer: it is
@@ -282,6 +283,12 @@ function registerIpc({
   })
 
   ipcMain.handle(CHANNELS.OUTPUT_READ, async (_event, relative) => history.readOutput(relative))
+
+  ipcMain.handle(CHANNELS.ERRORS_CLEAR, async () => {
+    state.clearErrors()
+    publish()
+    return { ok: true }
+  })
 
   ipcMain.handle(CHANNELS.ERRORS_ACKNOWLEDGE, async () => {
     state.acknowledgeErrors()

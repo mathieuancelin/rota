@@ -25,6 +25,7 @@ const CHANNELS = {
   HISTORY_READ: 'rota:history:read',
   OUTPUT_READ: 'rota:output:read',
   ERRORS_ACKNOWLEDGE: 'rota:errors:acknowledge',
+  ERRORS_CLEAR: 'rota:errors:clear',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   CONFIG_GENERATE_HTTP_TOKEN: 'rota:config:generateHttpToken',
@@ -86,6 +87,7 @@ contextBridge.exposeInMainWorld('rota', {
   readHistory: (id, options) => ipcRenderer.invoke(CHANNELS.HISTORY_READ, id, options),
   readOutput: (relative) => ipcRenderer.invoke(CHANNELS.OUTPUT_READ, relative),
   acknowledgeErrors: () => ipcRenderer.invoke(CHANNELS.ERRORS_ACKNOWLEDGE),
+  clearErrors: () => ipcRenderer.invoke(CHANNELS.ERRORS_CLEAR),
 
   setSchedulerPaused: (paused) => ipcRenderer.invoke(CHANNELS.SCHEDULER_SET_PAUSED, paused),
   patchConfig: (patch) => ipcRenderer.invoke(CHANNELS.CONFIG_PATCH, patch),

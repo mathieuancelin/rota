@@ -71,6 +71,24 @@ class StateStore {
     this.#scheduleFlush()
   }
 
+  /**
+   * Forgets the recent failures.
+   *
+   * Acknowledging says "seen" and leaves the list standing, which is what the
+   * badge in the header needs. This is the other half: once they have been read
+   * they are noise, and a list that only ever grows is one nobody looks at.
+   *
+   * Nothing is lost that mattered — every failure is in the job's own history,
+   * with its output and its exit code. This list is a shortcut to the last few,
+   * not the record.
+   */
+  clearErrors() {
+    if (this.state.recentErrors.length === 0) return
+    this.state.recentErrors = []
+    this.state.acknowledgedErrorsAt = new Date().toISOString()
+    this.#scheduleFlush()
+  }
+
   /** Removes the traces of jobs that no longer exist. */
   prune(existingJobIds) {
     const keep = new Set(existingJobIds)

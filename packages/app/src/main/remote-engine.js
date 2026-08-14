@@ -175,6 +175,7 @@ function createRemoteEngine({ paths, remote }) {
 
     state: {
       acknowledgeErrors: () => call('POST', '/api/v1/errors/acknowledge').catch(() => {}),
+      clearErrors: () => call('DELETE', '/api/v1/errors').catch(() => {}),
     },
 
     scheduler: {

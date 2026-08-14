@@ -89,7 +89,18 @@ export default function Dashboard({ state, onOpenJob }) {
         </section>
 
         <section>
-          <h2>Recent failures</h2>
+          <div className="list-header">
+            <h2>Recent failures</h2>
+            {state.recentErrors.length > 0 && (
+              <button
+                className="link"
+                title="Forget these — each one stays in its job’s history"
+                onClick={() => window.rota.clearErrors()}
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {state.recentErrors.length === 0 ? (
             <p className="muted">No failure recorded.</p>
           ) : (

@@ -82,6 +82,11 @@ async function handleUiRoutes(request, segments, deps) {
     return ok({ acknowledged: true })
   }
 
+  if (head === 'errors' && rest.length === 0 && method === 'DELETE') {
+    state.clearErrors()
+    return ok({ cleared: true })
+  }
+
   if (head === 'ui' && rest[0] === 'answer' && method === 'POST') {
     if (!ui?.answer) return json(503, { error: 'this engine takes no answers' })
     if (typeof body?.requestId !== 'string') return json(422, { error: 'requestId is expected' })
