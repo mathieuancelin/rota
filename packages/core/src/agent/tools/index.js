@@ -50,14 +50,16 @@ const BLOCKING = new Set(['ask_user', 'confirm'])
  * Withdrawals are announced rather than silent: an agent deprived of `fetch`
  * will fail, and the reason must be in the transcript, not deduced.
  *
- * @param {object} job validated definition
- * @param {{integrations?: object, unattended?: boolean}} [options] global
- *        settings some tools depend on, and the absence of a human
+ * Takes the agent configuration rather than the job it came from: a reusable
+ * profile is a configuration of exactly the same shape, and a sub-agent asked
+ * to embody one has to be equipped from it. The sandbox stays the job's — it is
+ * where the work happens, and delegating does not move it.
+ *
+ * @param {object} agent `runner.agent`, or a profile
+ * @param {{sandbox: object, integrations?: object, unattended?: boolean}} options
  * @returns {{tools: object[], notices: string[]}}
  */
-function selectTools(job, { integrations = {}, unattended = false } = {}) {
-  const { agent } = job.runner
-  const { sandbox } = job.execution
+function selectTools(agent, { sandbox, integrations = {}, unattended = false } = {}) {
   const tools = []
   const notices = []
 
@@ -98,6 +100,15 @@ function selectTools(job, { integrations = {}, unattended = false } = {}) {
   return { tools, notices }
 }
 
+/**
+ * The tools of a job's own agent — the ordinary case.
+ *
+ * The general form above takes a configuration, because a sub-agent embodying a
+ * reusable profile is equipped from one that belongs to no job.
+ */
+const selectJobTools = (job, options = {}) =>
+  selectTools(job.runner.agent, { sandbox: job.execution.sandbox, ...options })
+
 /** Declarations in the format the API expects. */
 function toolDefinitions(tools) {
   return tools.map((tool) => ({
@@ -117,4 +128,4 @@ function toolDefinitions(tools) {
 
 const byName = (tools) => new Map(tools.map((tool) => [tool.name, tool]))
 
-module.exports = { CATALOG, BLOCKING, selectTools, toolDefinitions, byName }
+module.exports = { CATALOG, BLOCKING, selectTools, selectJobTools, toolDefinitions, byName }

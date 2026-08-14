@@ -474,3 +474,331 @@ test('a session opened for a conversation delegates too', async () => {
   assert.equal(turn.ok, true, turn.error)
   assert.equal(server.seen[2].messages.at(-1).content, 'found it')
 })
+
+// --- delegating to a reusable agent -----------------------------------------------------
+//
+// The other half of the tool: instead of a second agent like the caller, the
+// task goes to somebody else — another model, other instructions, its own
+// memory. What matters here is the boundary, because a sub-agent runs inside the
+// caller's execution: what it may borrow, and what it may not.
+
+const { validateProfile } = require('../src/config/validate')
+
+const makeProfile = (overrides = {}) => {
+  const result = validateProfile({
+    id: 'relecteur',
+    name: 'Relecteur',
+    model: 'qwen:7b',
+    systemPrompt: 'Tu relis, tu ne corriges pas.',
+    tools: { enabled: ['file_read'] },
+    ...overrides,
+  })
+  assert.equal(result.ok, true, result.errors?.join(' | '))
+  return result.profile
+}
+
+/** A job allowed to delegate to the profiles named. */
+const jobDelegatingTo = (allow, agent = {}) =>
+  makeJob({
+    tools: { enabled: ['sub_agent', 'todo'], subagents: { allow }, ...(agent.tools ?? {}) },
+    ...agent,
+  })
+
+const delegatesTo = (id, task = 'Relis le dossier.') => ({
+  role: 'assistant',
+  content: '',
+  tool_calls: [toolCall('sub_agent', { task, agent: id })],
+})
+
+const lookup = (...profiles) => (id) => profiles.find((p) => p.id === id) ?? null
+
+test('the named agent answers with its own model and instructions', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['relecteur'])
+  const server = scriptedServer([
+    delegatesTo('relecteur'),
+    concludes('Trois coquilles.'),
+    concludes('Il en reste trois.'),
+  ])
+
+  const result = await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile()),
+  })
+
+  assert.equal(result.ok, true, result.error)
+  // The sub-agent's request carries the profile's model, not the job's.
+  assert.equal(server.seen[1].model, 'qwen:7b')
+  assert.equal(server.seen[0].model, 'gemma4:latest')
+  assert.ok(server.seen[1].messages[0].content.includes('Tu relis, tu ne corriges pas.'))
+  // And its answer comes back like any other sub-agent's.
+  assert.equal(server.seen[2].messages.at(-1).content, 'Trois coquilles.')
+})
+
+test('it is equipped from the profile, not from the caller', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['relecteur'])
+  const server = scriptedServer([delegatesTo('relecteur'), concludes('lu'), concludes('ok')])
+
+  await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile({ tools: { enabled: ['file_read', 'file_list'] } })),
+  })
+
+  const its = offered(server, 1)
+  assert.deepEqual(its.sort(), ['file_list', 'file_read'])
+  // The caller's own tools are not lent to it.
+  assert.ok(!its.includes('todo'))
+})
+
+// The reason the allowlist exists: a sub-agent runs in the caller's execution
+// and its results come back into the caller's conversation.
+test('an agent that is not allowed is refused, and the allowed ones are named', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['relecteur'])
+  const server = scriptedServer([delegatesTo('sysadmin'), concludes('tant pis')])
+
+  await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile(), makeProfile({ id: 'sysadmin', name: 'Sysadmin' })),
+  })
+
+  const back = server.seen[1].messages.at(-1)
+  assert.equal(back.role, 'tool')
+  assert.match(back.content, /not one of the agents this job may delegate to/)
+  assert.match(back.content, /relecteur/)
+  // Two requests only: the refusal costs no delegation.
+  assert.equal(server.seen.length, 2)
+})
+
+test('a job that lists none may delegate to none', async () => {
+  const paths = makePaths()
+  const job = makeJob({ tools: { enabled: ['sub_agent'] } })
+  const server = scriptedServer([delegatesTo('relecteur'), concludes('tant pis')])
+
+  await runAgent({ job, paths, fetchImpl: server.fetchImpl, getProfile: lookup(makeProfile()) })
+
+  assert.match(server.seen[1].messages.at(-1).content, /none is listed in tools\.subagents\.allow/)
+})
+
+test('an agent allowed but absent from profiles/ says so', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['disparu'])
+  const server = scriptedServer([delegatesTo('disparu'), concludes('tant pis')])
+
+  await runAgent({ job, paths, fetchImpl: server.fetchImpl, getProfile: lookup() })
+
+  assert.match(server.seen[1].messages.at(-1).content, /no reusable agent named "disparu"/)
+})
+
+// `deny` is the only say the caller keeps over what it invites into its own
+// execution.
+test('deny still applies to what the profile brings', async () => {
+  const paths = makePaths()
+  const job = makeJob({
+    tools: {
+      enabled: ['sub_agent'],
+      subagents: { allow: ['relecteur'], deny: ['file_list'] },
+    },
+  })
+  const server = scriptedServer([delegatesTo('relecteur'), concludes('lu'), concludes('ok')])
+
+  await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile({ tools: { enabled: ['file_read', 'file_list'] } })),
+  })
+
+  assert.deepEqual(offered(server, 1), ['file_read'])
+})
+
+test('it writes into the agent’s memory, not the job’s', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['relecteur'])
+  const server = scriptedServer([
+    delegatesTo('relecteur'),
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [toolCall('memory_write', { key: 'convention', value: 'tabs' })],
+    },
+    concludes('noté'),
+    concludes('ok'),
+  ])
+
+  await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile({ tools: { enabled: ['memory'] } })),
+  })
+
+  assert.equal((await memory.load(paths.memoryDir, 'relecteur')).entries.convention.value, 'tabs')
+  assert.equal((await memory.load(paths.memoryDir, 'demo')).entries.convention, undefined)
+})
+
+// Without this the model has no way of knowing what to pass: the parameter takes
+// an identifier it cannot guess.
+test('the instructions name the agents the job may delegate to', async () => {
+  const paths = makePaths()
+  const job = jobDelegatingTo(['relecteur'])
+  const server = scriptedServer([concludes('rien à faire')])
+
+  await runAgent({
+    job,
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(makeProfile({ description: 'Relit sans corriger.' })),
+  })
+
+  const instructions = server.seen[0].messages[0].content
+  assert.match(instructions, /# Agents you may delegate to/)
+  assert.match(instructions, /relecteur — Relecteur: Relit sans corriger\./)
+})
+
+test('a job that may delegate to nobody is told nothing about it', async () => {
+  const paths = makePaths()
+  const job = makeJob({ tools: { enabled: ['sub_agent'] } })
+  const server = scriptedServer([concludes('rien à faire')])
+
+  await runAgent({ job, paths, fetchImpl: server.fetchImpl })
+
+  assert.ok(!server.seen[0].messages[0].content.includes('# Agents you may delegate to'))
+})
+
+test('delegating still spends the execution’s budget', async () => {
+  const paths = makePaths()
+  const job = makeJob({
+    tools: { enabled: ['sub_agent'], subagents: { allow: ['relecteur'], maxPerRun: 1 } },
+  })
+  const server = scriptedServer([
+    delegatesTo('relecteur', 'première'),
+    concludes('un'),
+    delegatesTo('relecteur', 'seconde'),
+    concludes('deux'),
+  ])
+
+  await runAgent({ job, paths, fetchImpl: server.fetchImpl, getProfile: lookup(makeProfile()) })
+
+  // The second is refused by the same ceiling that bounds an ordinary sub-agent.
+  const refusal = server.seen[3].messages.at(-1)
+  assert.match(refusal.content, /already 1 sub-agents for this execution/)
+})
+
+// --- the connectors a profile brings ------------------------------------------------------
+//
+// Opened for one delegation and closed after it. This is the part that leaks if
+// it is wrong: a connector is a process, and one left running outlives the
+// execution that asked for it — invisibly, until there are forty of them.
+
+const MCP_SERVER = `
+require('node:fs').writeFileSync(process.argv[2], String(process.pid))
+const answer = (id, result) =>
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n')
+let rest = ''
+process.stdin.on('data', (chunk) => {
+  rest += chunk.toString('utf8')
+  let index
+  while ((index = rest.indexOf('\\n')) !== -1) {
+    const line = rest.slice(0, index)
+    rest = rest.slice(index + 1)
+    if (line.trim() === '') continue
+    const message = JSON.parse(line)
+    if (message.method === 'initialize') {
+      answer(message.id, {
+        protocolVersion: '2025-06-18',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'fixture', version: '1.0.0' },
+      })
+    } else if (message.method === 'tools/list') {
+      answer(message.id, { tools: [] })
+    }
+  }
+})
+`
+
+/** A profile whose connector records the pid it runs under. */
+function profileWithConnector(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rota-mcp-sub-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const server = path.join(dir, 'serveur.js')
+  const pidFile = path.join(dir, 'pid')
+  fs.writeFileSync(server, MCP_SERVER)
+
+  return {
+    pidFile,
+    profile: makeProfile({
+      mcp: [
+        {
+          name: 'fixture',
+          transport: 'stdio',
+          command: process.execPath,
+          args: [server, pidFile],
+          timeoutSeconds: 10,
+        },
+      ],
+    }),
+  }
+}
+
+const stillRunning = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+test('the connectors of the delegated agent are closed with it', async (t) => {
+  const paths = makePaths()
+  const { profile, pidFile } = profileWithConnector(t)
+  const server = scriptedServer([delegatesTo('relecteur'), concludes('lu'), concludes('ok')])
+
+  await runAgent({
+    job: jobDelegatingTo(['relecteur']),
+    paths,
+    fetchImpl: server.fetchImpl,
+    getProfile: lookup(profile),
+  })
+
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+  assert.ok(Number.isInteger(pid) && pid > 0, 'the connector must have started')
+  assert.equal(stillRunning(pid), false, 'and must not have outlived the delegation')
+})
+
+// The `finally` earns its keep here: a delegation that fails is exactly when one
+// forgets to clean up.
+test('they are closed too when the delegation fails', async (t) => {
+  const paths = makePaths()
+  const { profile, pidFile } = profileWithConnector(t)
+
+  let calls = 0
+  const fetchImpl = async (_url, options) => {
+    calls += 1
+    // The caller delegates; the agent it delegated to cannot reach its model.
+    if (calls === 1) {
+      return new Response(
+        JSON.stringify({ choices: [{ message: delegatesTo('relecteur') }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    if (calls === 2) return new Response('boom', { status: 500 })
+    return new Response(JSON.stringify({ choices: [{ message: concludes('tant pis') }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  await runAgent({ job: jobDelegatingTo(['relecteur']), paths, fetchImpl, getProfile: lookup(profile) })
+
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+  assert.equal(stillRunning(pid), false)
+})

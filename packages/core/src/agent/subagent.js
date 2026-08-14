@@ -43,6 +43,11 @@ function settingsOf(config = {}) {
     maxPerRun: config.maxPerRun ?? DEFAULT_MAX_PER_RUN,
     deny: config.deny ?? [],
     maxIterations: config.maxIterations ?? null,
+    // Which reusable agents this job may hand a task to. Empty allows none —
+    // deliberately the opposite of `jobs.allow`, because a sub-agent runs inside
+    // this execution with its own tools, and delegating would otherwise be a way
+    // round the tool list the job was given.
+    allow: config.allow ?? [],
   }
 }
 

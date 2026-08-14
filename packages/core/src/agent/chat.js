@@ -302,6 +302,7 @@ function createChatSessions({ store, runner, ui, send, discord = null }) {
         unattended: chat.origin !== 'ui',
         discord,
         jobs: runner.jobs,
+        getProfile: (id) => store.getProfile(id),
         // A conversation re-read from a file resumes with what was said in it:
         // your messages and its answers, without the tool traffic. Without that it
         // would look continuous on screen while starting from scratch for the

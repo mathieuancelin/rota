@@ -12,7 +12,7 @@ const assert = require('node:assert/strict')
 
 const { createDiscordSender, hasDestination, splitContent, MAX_CONTENT } = require('../src/discord/send')
 const { reportDiscord } = require('../src/agent/tools/discord')
-const { selectTools } = require('../src/agent/tools')
+const { selectJobTools } = require('../src/agent/tools')
 const { validateJob, validateConfig } = require('../src/config/validate')
 
 const WEBHOOK = 'https://discord.com/api/webhooks/123/abcdef'
@@ -220,14 +220,14 @@ test('an empty report is refused before anything is sent', async () => {
 // Better not to offer it than to let it fail at the moment the agent finally has
 // something to report.
 test('with no destination, the tool is not offered to the model', () => {
-  const { tools, notices } = selectTools(makeJob(), { integrations: {} })
+  const { tools, notices } = selectJobTools(makeJob(), { integrations: {} })
 
   assert.deepEqual(tools, [])
   assert.ok(notices[0].includes('no Discord destination'), notices.join(' | '))
 })
 
 test('a bot with no webhook is enough to offer it', () => {
-  const { tools } = selectTools(makeJob(), {
+  const { tools } = selectJobTools(makeJob(), {
     integrations: { discordBotToken: TOKEN, discordChannelId: CHANNEL },
   })
   assert.deepEqual(tools.map((tool) => tool.name), ['report_discord'])
@@ -238,7 +238,7 @@ test('a bot with no webhook is enough to offer it', () => {
 test('a sandbox with no network keeps report_discord and withdraws fetch', () => {
   const job = makeJob({ tools: { enabled: ['fetch', 'report_discord'] } }, { sandbox: { enabled: true } })
 
-  const names = selectTools(job, {
+  const names = selectJobTools(job, {
     integrations: { discordWebhookUrl: WEBHOOK },
   }).tools.map((tool) => tool.name)
   assert.deepEqual(names, ['report_discord'])

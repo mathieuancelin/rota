@@ -26,7 +26,7 @@ const memory = require('./memory')
 const { buildSystemPrompt, expandWork } = require('./prompt')
 const { settingsOf: subagentSettings, inheritedTools, taskMessage } = require('./subagent')
 const { createTranscript } = require('./transcript')
-const { selectTools, toolDefinitions, byName } = require('./tools')
+const { selectTools, selectJobTools, toolDefinitions, byName } = require('./tools')
 const { createTodoList } = require('./tools/todo')
 const { resolveWorkspace, ensureWorkspace } = require('./workspace')
 
@@ -67,6 +67,7 @@ async function createSession({
   jobs = null,
   work = null,
   workStore = null,
+  getProfile = null,
   history = [],
   fetchImpl = fetch,
   onEvent = () => {},
@@ -80,7 +81,7 @@ async function createSession({
     return { ok: false, error: `unusable working directory: ${err.message}` }
   }
 
-  const { tools, notices } = selectTools(job, { integrations, unattended })
+  const { tools, notices } = selectJobTools(job, { integrations, unattended })
   const toolsByName = byName(tools)
   const definitions = toolDefinitions(tools)
 
@@ -130,6 +131,16 @@ async function createSession({
   }
   for (const tool of mcp.tools) toolsByName.set(tool.name, tool)
   definitions.push(...toolDefinitions(mcp.tools))
+
+  // What the instructions will name, resolved once. A profile that is listed but
+  // missing from profiles/ is left out rather than announced: telling the model
+  // about an agent it would be refused costs it a turn to find out.
+  const delegableAgents = subagentSettings(agent.tools.subagents)
+    .allow.map((id) => {
+      const profile = getProfile?.(id) ?? null
+      return profile ? `${profile.id} — ${profile.name}${profile.description ? `: ${profile.description}` : ''}` : null
+    })
+    .filter(Boolean)
 
   const changes = []
   const todo = createTodoList()
@@ -193,7 +204,7 @@ async function createSession({
    * object that carried one would freeze it to whatever it was at that instant —
    * `undefined`, for the agent built before the first turn.
    */
-  const contextAt = (depth, tools) => ({
+  const contextAt = (depth, tools, borrowed = null) => ({
     ...sharedContext,
     get signal() {
       return currentSignal
@@ -203,51 +214,157 @@ async function createSession({
     todo: depth === 0 ? todo : createTodoList(),
     subAgents: budgetAt(depth),
     spawnSubAgent: (request) => spawn(request, { depth, tools }),
+    // Last, because a sub-agent embodying a reusable agent works from that
+    // agent's settings and memory rather than from this job's.
+    ...(borrowed ?? {}),
   })
 
   const toolContext = contextAt(0, available)
 
   /**
+   * Equips a sub-agent from a reusable agent instead of from its caller.
+   *
+   * What it takes from the profile is who it is — model, instructions, tools,
+   * connectors, memory. What it keeps from here is where the work happens: the
+   * working directory, the container, the stop button. It is still this job
+   * doing this job's work; the profile only says who is doing it.
+   *
+   * The allowlist is the reason this cannot be a free choice. A sub-agent runs
+   * inside the caller's execution, in its directory, and its results come back
+   * into its conversation — so delegating to an agent that has `shell` would
+   * hand `shell` to a job that never enabled it. Unlike `jobs.allow`, an empty
+   * list therefore allows nothing rather than everything.
+   *
+   * @returns {Promise<{ok: true, …} | {ok: false, error: string}>}
+   */
+  async function embody(profileId, childDepth, settings) {
+    if (settings.allow.length === 0) {
+      return {
+        ok: false,
+        error:
+          'this job may not delegate to a reusable agent — none is listed in tools.subagents.allow',
+      }
+    }
+    if (!settings.allow.includes(profileId)) {
+      return {
+        ok: false,
+        error:
+          `"${profileId}" is not one of the agents this job may delegate to ` +
+          `(${settings.allow.join(', ')})`,
+      }
+    }
+
+    const profile = getProfile?.(profileId) ?? null
+    if (!profile) return { ok: false, error: `no reusable agent named "${profileId}" in profiles/` }
+
+    const say = (text) => {
+      notices.push(`${profileId}: ${text}`)
+      onEvent({ type: 'notice', text: `${profileId}: ${text}`, depth: childDepth })
+    }
+
+    const selected = selectTools(profile, {
+      sandbox: job.execution.sandbox,
+      integrations,
+      unattended,
+    })
+    for (const notice of selected.notices) say(notice)
+
+    // `deny` still applies to what the profile brings: it is the only say the
+    // caller keeps over what it is inviting into its own execution.
+    const denied = new Set(settings.deny)
+    if (childDepth >= settings.maxDepth) denied.add('sub_agent')
+    const tools = selected.tools.filter((tool) => !denied.has(tool.name))
+
+    const profileState = profile.memory.enabled
+      ? await memory.load(paths.memoryDir, profile.id)
+      : memory.empty()
+
+    // Opened for this delegation and closed after it — see the `finally` in
+    // spawn(). A profile that declares connectors is not honoured by half.
+    const profileMcp = await connectAll(profile.mcp, { env, workspace, fetchImpl })
+    for (const notice of profileMcp.notices) say(notice)
+
+    return {
+      ok: true,
+      profile,
+      tools: [...tools, ...profileMcp.tools],
+      state: profileState,
+      close: profileMcp.close,
+      client: createClient({ agent: profile, env, fetchImpl, onNotice: say }),
+      // What replaces the caller's in the sub-agent's tool context. The tool
+      // settings become the profile's — its fetch allowlist, its jobs.allow —
+      // save for the delegation budget, which stays the caller's: the ceilings
+      // protect the machine, not the agent.
+      context: {
+        config: { ...profile.tools, subagents: agent.tools.subagents },
+        memoryConfig: profile.memory,
+        memory: profileState,
+        saveMemory: () =>
+          memory.save(paths.memoryDir, profile.id, profileState, {
+            maxEntries: profile.memory.maxEntries,
+          }),
+      },
+    }
+  }
+
+  /**
    * Runs a sub-agent to its conclusion and returns what it concluded.
    *
-   * Same client, same tools less what `deny` withdraws, same everything the
-   * caller shares — see ./subagent.js for what is shared and what is not. Its
-   * events go out on the caller's stream, one level deeper, which is what puts
-   * its turns into the transcript indented under the call.
+   * By default: same client, same tools less what `deny` withdraws, same
+   * everything the caller shares — see ./subagent.js. Named a profile, it is
+   * that agent that answers instead, equipped by `embody` above.
+   *
+   * Its events go out on the caller's stream, one level deeper, which is what
+   * puts its turns into the transcript indented under the call.
    */
-  async function spawn({ task, context }, { depth, tools: inherited }) {
+  async function spawn({ task, context, profileId = null }, { depth, tools: inherited }) {
     const settings = subagentSettings(agent.tools.subagents)
     const childDepth = depth + 1
-    const childTools = inheritedTools(inherited, childDepth, settings)
+
+    const borrowed = profileId ? await embody(profileId, childDepth, settings) : null
+    if (borrowed && !borrowed.ok) return { ok: false, error: borrowed.error, iterations: 0 }
+
+    const childAgent = borrowed ? borrowed.profile : agent
+    const childTools = borrowed ? borrowed.tools : inheritedTools(inherited, childDepth, settings)
     const childByName = byName(childTools)
 
-    return runToolLoop({
-      client,
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemPrompt({
-            job,
-            memory: state,
-            globalMemory: globalState,
-            trigger,
-            sandboxed: environment.sandboxed,
-            toolNames: [...childByName.keys()],
-            subAgent: true,
-            work,
-          }),
-        },
-        { role: 'user', content: taskMessage({ task, context }) },
-      ],
-      definitions: toolDefinitions(childTools),
-      toolsByName: childByName,
-      context: contextAt(childDepth, childTools),
-      maxIterations: settings.maxIterations ?? agent.maxIterations,
-      signal: currentSignal,
-      // One level deeper on the caller's stream: that is what puts its turns
-      // into the transcript, indented under the call that started it.
-      onEvent: (event) => onEvent({ ...event, depth: (event.depth ?? 0) + 1 }),
-    })
+    try {
+      return await runToolLoop({
+        client: borrowed ? borrowed.client : client,
+        messages: [
+          {
+            role: 'system',
+            content: buildSystemPrompt({
+              job,
+              agent: childAgent,
+              memory: borrowed ? borrowed.state : state,
+              globalMemory: globalState,
+              trigger,
+              sandboxed: environment.sandboxed,
+              toolNames: [...childByName.keys()],
+              subAgent: true,
+              work,
+              delegableAgents,
+            }),
+          },
+          { role: 'user', content: taskMessage({ task, context }) },
+        ],
+        definitions: toolDefinitions(childTools),
+        toolsByName: childByName,
+        context: contextAt(childDepth, childTools, borrowed?.context),
+        // The profile's own turn budget when it is one answering: an agent that
+        // says fifteen turns knows better than the caller what its work costs.
+        maxIterations: settings.maxIterations ?? childAgent.maxIterations,
+        signal: currentSignal,
+        // One level deeper on the caller's stream: that is what puts its turns
+        // into the transcript, indented under the call that started it.
+        onEvent: (event) => onEvent({ ...event, depth: (event.depth ?? 0) + 1 }),
+      })
+    } finally {
+      // Whatever the outcome, cancellation and timeout included: a connector
+      // left open would outlive the execution that asked for it.
+      await borrowed?.close?.()
+    }
   }
 
   // The instructions first, then what had been said if the conversation resumes.
@@ -265,6 +382,7 @@ async function createSession({
         sandboxed: environment.sandboxed,
         toolNames: [...toolsByName.keys()],
         work,
+        delegableAgents,
       }),
     },
     ...history.filter(

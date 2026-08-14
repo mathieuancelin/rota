@@ -12,7 +12,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const { resolveInWorkspace, resolveWorkspace, ensureWorkspace } = require('../src/agent/workspace')
-const { selectTools, toolDefinitions, byName } = require('../src/agent/tools')
+const { selectJobTools, toolDefinitions, byName } = require('../src/agent/tools')
 const { createTodoList } = require('../src/agent/tools/todo')
 const { hostAllowed } = require('../src/agent/tools/net')
 const memory = require('../src/agent/memory')
@@ -49,7 +49,7 @@ const context = (root, overrides = {}) => {
   }
 }
 
-const tool = (job, name) => byName(selectTools(job).tools).get(name)
+const tool = (job, name) => byName(selectJobTools(job).tools).get(name)
 
 const ALL = [
   'fetch',
@@ -441,14 +441,14 @@ test('a corrupt memory file does not block the job', async () => {
 
 test('only the declared tools are offered to the model', () => {
   const job = makeJob({ tools: { enabled: ['file_read', 'todo'] } })
-  const names = selectTools(job).tools.map((t) => t.name)
+  const names = selectJobTools(job).tools.map((t) => t.name)
 
   assert.deepEqual(names, ['file_read', 'todo_read', 'todo_add', 'todo_del', 'todo_clear'])
 })
 
 test('every tool of the catalogue produces a usable declaration', () => {
   const job = makeJob({ tools: { enabled: ALL } })
-  const definitions = toolDefinitions(selectTools(job).tools)
+  const definitions = toolDefinitions(selectJobTools(job).tools)
 
   assert.equal(definitions.length, 19, 'thirteen entries, two of them groups of several tools')
   for (const definition of definitions) {
@@ -464,7 +464,7 @@ test('every tool of the catalogue produces a usable declaration', () => {
 // would open exactly the hole that "network off" claims to close.
 test('a sandbox with no network withdraws fetch, and says so', () => {
   const job = makeJob({ tools: { enabled: ['fetch', 'todo'] } }, { sandbox: { enabled: true } })
-  const { tools, notices } = selectTools(job)
+  const { tools, notices } = selectJobTools(job)
 
   assert.equal(tools.some((t) => t.name === 'fetch'), false)
   assert.equal(notices.length, 1)
@@ -475,7 +475,7 @@ test('a sandbox with no network withdraws fetch, and says so', () => {
 // wait out its timeout for nothing, and a `confirm` would end as a refusal.
 test('a turn with nobody at the screen loses the tools that wait', () => {
   const job = makeJob({ tools: { enabled: ['ask_user', 'confirm', 'report', 'todo'] } })
-  const { tools, notices } = selectTools(job, { unattended: true })
+  const { tools, notices } = selectJobTools(job, { unattended: true })
 
   const names = tools.map((tool) => tool.name)
   assert.equal(names.includes('ask_user'), false)
@@ -489,7 +489,7 @@ test('a turn with nobody at the screen loses the tools that wait', () => {
 
 test('with somebody at the screen, they stay offered', () => {
   const job = makeJob({ tools: { enabled: ['ask_user', 'confirm'] } })
-  const { tools, notices } = selectTools(job)
+  const { tools, notices } = selectJobTools(job)
 
   assert.deepEqual(tools.map((tool) => tool.name), ['ask_user', 'confirm'])
   assert.deepEqual(notices, [])
@@ -500,12 +500,12 @@ test('a sandbox with the network keeps fetch', () => {
     { tools: { enabled: ['fetch'] } },
     { sandbox: { enabled: true, network: true } },
   )
-  assert.deepEqual(selectTools(job).tools.map((t) => t.name), ['fetch'])
+  assert.deepEqual(selectJobTools(job).tools.map((t) => t.name), ['fetch'])
 })
 
 test('memory switched off withdraws its tools, and says so', () => {
   const job = makeJob({ tools: { enabled: ['memory', 'todo'] }, memory: { enabled: false } })
-  const { tools, notices } = selectTools(job)
+  const { tools, notices } = selectJobTools(job)
 
   assert.equal(tools.some((t) => t.name.startsWith('memory_')), false)
   assert.ok(notices[0].includes('memory'))

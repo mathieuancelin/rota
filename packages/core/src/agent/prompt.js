@@ -71,10 +71,16 @@ const touchesDisk = (toolNames) =>
  * @param {string[]} [options.toolNames] tools actually offered
  * @param {boolean} [options.subAgent] this agent was handed a task by another
  * @param {{id: string, input: object}|null} [options.work] the queue item, if any
+ * @param {string[]} [options.delegableAgents] reusable agents this job may hand
+ *   a task to, as "id — name" lines
+ * @param {object} [options.agent] whose instructions to use. The job's own by
+ *   default; a reusable profile when a sub-agent was asked to embody one, since
+ *   the instructions are then that agent's and not this job's.
  * @returns {string}
  */
 function buildSystemPrompt({
   job,
+  agent = job.runner.agent,
   memory: state,
   globalMemory = memory.empty(),
   trigger,
@@ -82,10 +88,11 @@ function buildSystemPrompt({
   toolNames = [],
   subAgent = false,
   work = null,
+  delegableAgents = [],
 }) {
   const sections = []
 
-  const own = expandWork(expandDefaults(job.runner.agent.systemPrompt), work).trim()
+  const own = expandWork(expandDefaults(agent.systemPrompt), work).trim()
   if (own !== '') sections.push(own)
 
   const context = [
@@ -125,6 +132,23 @@ function buildSystemPrompt({
         '',
         'You share its working directory, its memory and its machine: what you write ' +
           'is what it will find.',
+      ].join('\n'),
+    )
+  }
+
+  // Whom this job may hand a task to. Named here because there is nowhere else
+  // the model could learn it: the tool takes an identifier, and an identifier it
+  // cannot guess is a parameter it will not use — or will invent.
+  if (toolNames.includes('sub_agent') && delegableAgents.length > 0) {
+    sections.push(
+      [
+        '# Agents you may delegate to',
+        '',
+        'Pass one of these identifiers as `agent` to sub_agent, and it is that agent that answers ' +
+          'instead of a second one like you. It has its own instructions, its own tools and its ' +
+          'own memory; it works in your directory and sees nothing of this conversation.',
+        '',
+        delegableAgents.map((entry) => `- ${entry}`).join('\n'),
       ].join('\n'),
     )
   }

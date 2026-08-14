@@ -819,6 +819,16 @@
                   "uniqueItems": true,
                   "default": []
                 },
+                "allow": {
+                  "type": "array",
+                  "description": "Reusable agents from profiles/ this job may hand a task to, through sub_agent's \"agent\" parameter. Empty allows none — deliberately the opposite of tools.jobs.allow, because a sub-agent runs inside this execution, in its working directory, with the tools of the agent it embodies: delegating to an agent that has shell would otherwise hand shell to a job that never enabled it. The names are also listed in the instructions, so the model knows whom it may ask.",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                  },
+                  "uniqueItems": true,
+                  "default": []
+                },
                 "maxIterations": {
                   "type": "integer",
                   "description": "Turn budget of one sub-agent. Declare none and it inherits the job's — which is usually too generous for a task that was meant to be narrow.",
@@ -1150,6 +1160,15 @@
                   "description": "Tools withdrawn from sub-agents. Empty, a sub-agent has exactly what this job has. This is where you hand out a reader that cannot write, or keep run_job for yourself.",
                   "items": {
                     "$ref": "#/definitions/toolName"
+                  },
+                  "uniqueItems": true
+                },
+                "allow": {
+                  "type": "array",
+                  "description": "Reusable agents from profiles/ this job may hand a task to, through sub_agent's \"agent\" parameter. Empty allows none — deliberately the opposite of tools.jobs.allow, because a sub-agent runs inside this execution, in its working directory, with the tools of the agent it embodies: delegating to an agent that has shell would otherwise hand shell to a job that never enabled it. The names are also listed in the instructions, so the model knows whom it may ask.",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
                   },
                   "uniqueItems": true
                 },

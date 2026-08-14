@@ -947,6 +947,24 @@ export default function JobForm({ job, onChange, profiles = [] }) {
                 placeholder="empty = all · one identifier per line"
               />
             )}
+            {agentTools.includes('sub_agent') && (
+              <>
+                <Checklist
+                  {...props}
+                  path={['runner', 'agent', 'tools', 'subagents', 'allow']}
+                  label="Agents it may delegate to"
+                  options={profiles.map((profile) => [
+                    profile.id,
+                    `${profile.id} — ${profile.name}`,
+                  ])}
+                />
+                <Note>
+                  Empty, it delegates only to a second agent like itself. A named agent answers
+                  with its own model, instructions and tools — including tools this job does not
+                  have, which is why they are chosen here one by one.
+                </Note>
+              </>
+            )}
             {(agentTools.includes('ask_user') || agentTools.includes('confirm')) && (
               <Numeric
                 {...props}

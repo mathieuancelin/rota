@@ -516,6 +516,7 @@ class Runner extends EventEmitter {
           trigger,
           work,
           workStore: this.work,
+          getProfile: (id) => this.store.getProfile(id),
           ui: this.ui,
           // Nobody at the screen means the tools that wait for an answer are
           // withdrawn before the turn rather than failing in the middle of it,

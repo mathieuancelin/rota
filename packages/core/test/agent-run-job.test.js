@@ -12,7 +12,7 @@ const assert = require('node:assert/strict')
 
 const { createJobLauncher, MAX_TRIGGERS_PER_RUN } = require('../src/agent/jobs')
 const { runJob } = require('../src/agent/tools/jobs')
-const { selectTools, byName } = require('../src/agent/tools')
+const { selectJobTools, byName } = require('../src/agent/tools')
 const { validateJob } = require('../src/config/validate')
 
 const makeJob = (id, tools = {}) => {
@@ -219,9 +219,9 @@ test('an outsized delay is brought back to the bound, not refused', async (t) =>
 // --- availability --------------------------------------------------------------
 
 test('the tool is offered only if it is declared', () => {
-  const avec = byName(selectTools(makeJob('depile')).tools)
+  const avec = byName(selectJobTools(makeJob('depile')).tools)
   assert.ok(avec.has('run_job'))
 
-  const sans = byName(selectTools(makeJob('depile', { enabled: ['todo'] })).tools)
+  const sans = byName(selectJobTools(makeJob('depile', { enabled: ['todo'] })).tools)
   assert.equal(sans.has('run_job'), false)
 })
