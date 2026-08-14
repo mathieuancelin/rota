@@ -3,6 +3,11 @@
   "productName": "Rota",
   "version": "0.1.0",
   "description": "Local recurring task engine with a graphical interface, living in the system tray.",
+  "homepage": "https://github.com/mathieuancelin/rota",
+  "author": {
+    "name": "Mathieu Ancelin",
+    "email": "mathieu.ancelin@gmail.com"
+  },
   "license": "MIT",
   "private": true,
   "main": "src/main/index.js",
