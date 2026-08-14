@@ -5,6 +5,7 @@ import Chat from './Chat.jsx'
 import JobForm from './JobForm.jsx'
 import JobHistory from './JobHistory.jsx'
 import LiveOutput from './LiveOutput.jsx'
+import Work from './Work.jsx'
 
 // Editing a job: the JSON, and depending on its type, one or two text tabs.
 //
@@ -104,8 +105,8 @@ const sourceTabs = (parsed) => SOURCE_TABS[parsed?.runner?.type] ?? []
  * therefore never pulled from under one's feet, and Monaco's container gives
  * way to them.
  */
-const PERMANENT_TABS = new Set(['form', 'json', 'chat', 'history'])
-const WITHOUT_EDITOR = new Set(['form', 'chat', 'history'])
+const PERMANENT_TABS = new Set(['form', 'json', 'chat', 'history', 'work'])
+const WITHOUT_EDITOR = new Set(['form', 'chat', 'history', 'work'])
 
 function readPath(target, path) {
   return path.reduce((value, key) => (value == null ? undefined : value[key]), target)
@@ -481,6 +482,17 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
         {/* Last, behind a rule: the other tabs write into the definition, this
             one tells what it did. */}
         <span className="tab-rule" aria-hidden="true" />
+        {/* Only for a job that consumes a queue: a Work tab on a job with no
+            `work` trigger would show an empty list and explain nothing. */}
+        {job?.triggers?.some((trigger) => trigger.type === 'work') && (
+          <button
+            className={`tab ${tab === 'work' ? 'active' : ''}`}
+            onClick={() => openTab('work')}
+          >
+            Work
+            {job.work?.pending > 0 && <span className="badge">{job.work.pending}</span>}
+          </button>
+        )}
         <button
           className={`tab ${tab === 'history' ? 'active' : ''}`}
           onClick={() => openTab('history')}
@@ -502,6 +514,8 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
           to lose there, and re-reading it is exactly what one comes to do. */}
       {tab === 'history' && <JobHistory jobId={jobId} focusExecutionId={focusExecutionId} />}
 
+      {tab === 'work' && <Work state={{ work: job?.work }} jobId={jobId} />}
+
       {/* Mounted once, then hidden rather than unmounted: the conversation
           thread survives going back and forth between tabs. */}
       {chatMounted && (
@@ -521,7 +535,7 @@ export default function JobEditor({ jobId, job, running, initialTab, focusExecut
       )}
       {/* Neither the conversation nor the history edits the definition: the save
           state means nothing there. The form, on the other hand, does. */}
-      {tab !== 'chat' && tab !== 'history' && (
+      {tab !== 'chat' && tab !== 'history' && tab !== 'work' && (
         <>
           {saved && <p className="tone-ok">Saved. The job has been reloaded.</p>}
           {dirty && errors.length === 0 && !saved && (

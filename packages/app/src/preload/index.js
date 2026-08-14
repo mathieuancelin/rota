@@ -26,6 +26,11 @@ const CHANNELS = {
   OUTPUT_READ: 'rota:output:read',
   ERRORS_ACKNOWLEDGE: 'rota:errors:acknowledge',
   ERRORS_CLEAR: 'rota:errors:clear',
+  WORK_LIST: 'rota:work:list',
+  WORK_CREATE: 'rota:work:create',
+  WORK_RETRY: 'rota:work:retry',
+  WORK_CANCEL: 'rota:work:cancel',
+  WORK_DELETE: 'rota:work:delete',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   CONFIG_GENERATE_HTTP_TOKEN: 'rota:config:generateHttpToken',
@@ -88,6 +93,13 @@ contextBridge.exposeInMainWorld('rota', {
   readOutput: (relative) => ipcRenderer.invoke(CHANNELS.OUTPUT_READ, relative),
   acknowledgeErrors: () => ipcRenderer.invoke(CHANNELS.ERRORS_ACKNOWLEDGE),
   clearErrors: () => ipcRenderer.invoke(CHANNELS.ERRORS_CLEAR),
+
+  /** The work queues. The list is fetched, never pushed with the state. */
+  listWork: (filter) => ipcRenderer.invoke(CHANNELS.WORK_LIST, filter ?? {}),
+  createWork: (item) => ipcRenderer.invoke(CHANNELS.WORK_CREATE, item),
+  retryWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_RETRY, id),
+  cancelWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_CANCEL, id),
+  deleteWork: (id) => ipcRenderer.invoke(CHANNELS.WORK_DELETE, id),
 
   setSchedulerPaused: (paused) => ipcRenderer.invoke(CHANNELS.SCHEDULER_SET_PAUSED, paused),
   patchConfig: (patch) => ipcRenderer.invoke(CHANNELS.CONFIG_PATCH, patch),

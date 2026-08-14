@@ -476,10 +476,130 @@ async function setEnabled(context, enabled) {
   )
 }
 
+// --- The queues -----------------------------------------------------------------
+
+const WORK_STATUS_COLOUR = {
+  pending: (style, text) => style.dim(text),
+  claimed: (style, text) => text,
+  running: (style, text) => style.green(text),
+  done: (style, text) => style.green(text),
+  failed: (style, text) => style.red(text),
+  cancelled: (style, text) => style.yellow(text),
+}
+
+/** A one-line summary of what an item is about, for the table. */
+function summariseInput(input) {
+  const entries = Object.entries(input ?? {})
+  if (entries.length === 0) return ''
+  return entries
+    .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`)
+    .join(' ')
+    .slice(0, 48)
+}
+
+/**
+ * The work queues.
+ *
+ * The only command with sub-commands, and it earns them: listing, queueing and
+ * retrying are not variations on one another, and four top-level names for one
+ * concept would read worse than one name with four verbs.
+ */
+async function work(context) {
+  const { options, style, out, fail } = context
+  const [verb = 'list', target = null] = context.arguments
+  const api = client(await openStore(context.paths), options)
+
+  if (verb === 'list') {
+    const query = new URLSearchParams()
+    if (target) query.set('jobId', target)
+    const suffix = query.toString() ? `?${query}` : ''
+    const answer = await api.get(`/api/work${suffix}`)
+    if (options.json) return out(answer)
+
+    return out(
+      table(
+        ['ITEM', 'JOB', 'STATUS', 'AGE', 'TRIES', 'INPUT'],
+        answer.items.map((item) => [
+          style.bold(item.id),
+          item.jobId,
+          (WORK_STATUS_COLOUR[item.status] ?? ((_, text) => text))(style, item.status),
+          relativeTime(item.createdAt),
+          String(item.attempts),
+          style.dim(summariseInput(item.input)),
+        ]),
+        { style, empty: 'no work queued' },
+      ),
+    )
+  }
+
+  if (verb === 'add') {
+    if (!target) return fail('work add needs a job identifier')
+
+    let input = {}
+    if (options.input) {
+      try {
+        input = JSON.parse(options.input)
+      } catch (err) {
+        return fail(`--input is not valid JSON: ${err.message}`)
+      }
+    }
+
+    const answer = await api.post('/api/work', {
+      jobId: target,
+      input,
+      ...(options.id ? { id: options.id } : {}),
+    })
+    if (options.json) return out(answer)
+    return out(`${style.green('queued')} ${answer.id} ${style.dim(`for ${answer.jobId}`)}`)
+  }
+
+  if (!target) return fail(`work ${verb} needs a work item identifier`)
+  const id = encodeURIComponent(target)
+
+  if (verb === 'show') {
+    const item = await api.get(`/api/work/${id}`)
+    if (options.json) return out(item)
+
+    out(`${style.dim('item    ')} ${style.bold(item.id)}`)
+    out(`${style.dim('job     ')} ${item.jobId}`)
+    out(`${style.dim('status  ')} ${item.status}`)
+    out(`${style.dim('tries   ')} ${item.attempts}`)
+    out(`${style.dim('created ')} ${relativeTime(item.createdAt)}`)
+    if (item.availableAt) out(`${style.dim('held til')} ${relativeTime(item.availableAt)}`)
+    if (item.executionId) out(`${style.dim('run     ')} ${item.executionId}`)
+    if (item.error) out(`${style.dim('error   ')} ${style.red(item.error)}`)
+    out('')
+    out(`${style.dim('input')}`)
+    out(JSON.stringify(item.input, null, 2), { raw: true })
+    if (item.result) {
+      out('')
+      out(`${style.dim('result')}`)
+      out(item.result, { raw: true })
+    }
+    return
+  }
+
+  if (verb === 'retry' || verb === 'cancel') {
+    const item = await api.post(`/api/work/${id}/${verb}`)
+    if (options.json) return out(item)
+    const label = verb === 'retry' ? style.green('queued again') : style.yellow('cancelled')
+    return out(`${label} ${item.id}`)
+  }
+
+  if (verb === 'rm') {
+    const answer = await api.delete(`/api/work/${id}`)
+    if (options.json) return out(answer)
+    return out(`${style.yellow('removed')} ${answer.removed}`)
+  }
+
+  return fail(`unknown: work ${verb} — try list, add, show, retry, cancel or rm`)
+}
+
 module.exports = {
   jobs,
   show,
   next,
+  work,
   history,
   logs,
   validate,

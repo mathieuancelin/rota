@@ -38,7 +38,54 @@ const job = (overrides = {}) => ({
   ...overrides,
 })
 
-function makeDeps({ http = {}, jobs = [job()], envFile = '/nowhere/.env' } = {}) {
+const workItem = (overrides = {}) => ({
+  id: 'sync-notes',
+  jobId: 'sync-notes',
+  status: 'pending',
+  input: { page: 3 },
+  result: null,
+  error: null,
+  attempts: 0,
+  availableAt: null,
+  executionId: null,
+  createdAt: '2026-08-05T09:00:00.000Z',
+  updatedAt: '2026-08-05T09:00:00.000Z',
+  ...overrides,
+})
+
+/**
+ * An in-memory stand-in for the queue: the router only ever calls these six.
+ *
+ * The item is named after the job on purpose — the test that replays every
+ * described operation substitutes one identifier everywhere, and an item that
+ * did not answer to it would look like a route that is described but not
+ * served.
+ */
+function makeWork(items = [workItem()]) {
+  const byId = new Map(items.map((item) => [item.id, item]))
+  return {
+    byId,
+    list: ({ jobId = null, status = null } = {}) =>
+      [...byId.values()].filter(
+        (item) => (!jobId || item.jobId === jobId) && (!status || item.status === status),
+      ),
+    get: (id) => byId.get(id) ?? null,
+    create: async ({ jobId, input, id }) => {
+      const chosen = id ?? 'generated'
+      if (byId.has(chosen)) {
+        return { ok: false, error: `A work item named "${chosen}" already exists` }
+      }
+      const item = workItem({ id: chosen, jobId, input })
+      byId.set(chosen, item)
+      return { ok: true, item }
+    },
+    remove: async (id) => byId.delete(id),
+    retry: async (id) => ({ ...byId.get(id), status: 'pending', attempts: 0 }),
+    cancel: async (id) => ({ ...byId.get(id), status: 'cancelled' }),
+  }
+}
+
+function makeDeps({ http = {}, jobs = [job()], envFile = '/nowhere/.env', work = makeWork() } = {}) {
   const calls = []
   return {
     calls,
@@ -67,6 +114,7 @@ function makeDeps({ http = {}, jobs = [job()], envFile = '/nowhere/.env' } = {})
       liveOutput: () => ({ ok: true, stdout: { text: '' }, stderr: { text: '' } }),
       cancel: (executionId) => calls.push(['cancel', executionId]),
     },
+    work,
     state: { lastRunByJob: () => new Map() },
     history: {
       read: async () => ({
@@ -496,6 +544,72 @@ test('with no token, the server opens no port either', async (t) => {
 // people calling addresses that have gone. So it is checked from both ends —
 // every operation it describes must exist, and every action the router handles
 // must be described.
+
+// --- the queues ---------------------------------------------------------------------
+
+// The route the whole feature exists for: something outside Rota puts work on a
+// queue, and a worker picks it up without anybody being at the screen.
+test('work can be queued for a job over HTTP', async () => {
+  const deps = makeDeps()
+
+  const response = await call('POST', '/api/work', deps, {
+    body: { jobId: 'sync-notes', id: 'gh-421', input: { issue: 421 } },
+  })
+
+  assert.equal(response.status, 201)
+  assert.equal(response.body.jobId, 'sync-notes')
+  assert.deepEqual(response.body.input, { issue: 421 })
+  assert.equal(deps.work.byId.has('gh-421'), true)
+})
+
+// An integration replaying the same event must not queue the work twice, and
+// has to be able to tell that is what happened.
+test('an identifier already taken answers 409, not a second item', async () => {
+  const deps = makeDeps()
+  await call('POST', '/api/work', deps, { body: { jobId: 'sync-notes', id: 'gh-421' } })
+
+  const again = await call('POST', '/api/work', deps, { body: { jobId: 'sync-notes', id: 'gh-421' } })
+
+  assert.equal(again.status, 409)
+  assert.equal(deps.work.byId.size, 2)
+})
+
+// A queue nobody reads is work quietly lost.
+test('work for a job that does not exist is refused', async () => {
+  const response = await call('POST', '/api/work', makeDeps(), {
+    body: { jobId: 'nowhere', input: {} },
+  })
+
+  assert.equal(response.status, 422)
+  assert.match(response.body.error, /unknown job/)
+})
+
+test('the queue can be listed, and filtered', async () => {
+  const deps = makeDeps({
+    work: makeWork([workItem({ id: 'a' }), workItem({ id: 'b', status: 'done' })]),
+  })
+
+  const all = await call('GET', '/api/work', deps)
+  const done = await call('GET', '/api/work?status=done', deps)
+
+  assert.equal(all.body.items.length, 2)
+  assert.deepEqual(
+    done.body.items.map((item) => item.id),
+    ['b'],
+  )
+})
+
+test('an unknown item is a 404, like anything else that is not there', async () => {
+  const response = await call('GET', '/api/work/nope', makeDeps())
+
+  assert.equal(response.status, 404)
+})
+
+test('the queue routes are behind the token like the rest', async () => {
+  const response = await call('GET', '/api/work', makeDeps(), { token: null })
+
+  assert.equal(response.status, 401)
+})
 
 const { buildSpec, OPERATIONS } = require('../src/http/openapi')
 

@@ -15,12 +15,26 @@
 const { EventEmitter } = require('node:events')
 
 const logger = require('../lib/logger')
+const { truncateToBytes } = require('../runner/output')
 const { isTimed, nextRunAt, missedOccurrences, timeoutFor } = require('./next-run')
 const { watchPath, DEFAULT_SETTLE_MS } = require('./watch-path')
 
 // The label an `after` run carries in the history, and the mark that stops it
 // from starting anything in turn.
 const AFTER_TRIGGER = 'after'
+
+// The label a run taken off the queue carries.
+const WORK_TRIGGER = 'work'
+
+// Defaults of a `work` trigger that declares neither. Kept here rather than in
+// the schema, which would write them into every trigger of every type.
+const DEFAULT_MAX_ATTEMPTS = 3
+const DEFAULT_BACKOFF_SECONDS = 60
+
+// What is kept of an execution's output as the item's result. Enough to see
+// what came of it from the queue view; the whole of it is in the history, under
+// the execution the item names.
+const RESULT_BYTES = 4096
 
 // A timer key designates a trigger, not a job. The index is enough: it is stable
 // as long as the file does not change, and a file that changes goes back
@@ -34,18 +48,32 @@ function timedTriggers(job) {
     .filter(({ trigger }) => isTimed(trigger))
 }
 
+/**
+ * The `work` trigger of a job, or null.
+ *
+ * One at most is meaningful: a second would say the same thing about the same
+ * queue, and the first one found is the one that answers.
+ */
+function workTrigger(job) {
+  return (job.triggers ?? []).find((t) => t.type === 'work' && t.enabled !== false) ?? null
+}
+
 class Scheduler extends EventEmitter {
   /**
    * @param {object} deps
    * @param {import('../config/store').ConfigStore} deps.store
    * @param {import('../state-store').StateStore} deps.state
    * @param {import('../runner').Runner} deps.runner
+   * @param {import('../work/store').WorkStore} [deps.work] the queues. Absent,
+   *   `work` triggers simply never fire — which is what every test that does not
+   *   care about them wants.
    */
-  constructor({ store, state, runner }) {
+  constructor({ store, state, runner, work = null }) {
     super()
     this.store = store
     this.state = state
     this.runner = runner
+    this.work = work
     /**
      * Armed timers, indexed by trigger — "<id>#<index>".
      * @type {Map<string, {timer: NodeJS.Timeout, targetAt: number, jobId: string}>}
@@ -69,6 +97,29 @@ class Scheduler extends EventEmitter {
     this.pendingPower = new Map()
     // Bound once so that stop() can take it off again.
     this.onFinished = (execution) => this.#onFinished(execution)
+    // Every move of a queue, not just an arrival. An item put back by hand —
+    // the Queue again button, `rotactl work retry`, a run somebody stopped —
+    // becomes available without anything being created, and a worker that only
+    // listened for arrivals would leave it sitting there until something
+    // unrelated happened to wake it.
+    this.onWorkChanged = (item) => {
+      const job = this.store.getJob(item.jobId)
+      if (job) this.#serveWork(job)
+    }
+    /**
+     * Jobs whose next item is being taken right now. Serving is asynchronous —
+     * the claim is a write — and two serves that overlapped would both pass the
+     * "is it running?" check before either had claimed anything.
+     * @type {Set<string>}
+     */
+    this.serving = new Set()
+    /**
+     * One timer per job whose queue holds nothing but items still serving out
+     * their backoff. Without it, a failed item would come back into the queue
+     * at an instant nobody was watching.
+     * @type {Map<string, NodeJS.Timeout>}
+     */
+    this.backoffTimers = new Map()
     /** One filesystem watcher per `path` trigger, keyed like the timers. */
     this.watchers = new Map()
     /** Paths we could not watch, so that the interface can say which. */
@@ -112,7 +163,15 @@ class Scheduler extends EventEmitter {
     // belongs to the scheduler, and an `after` trigger is one more thing that
     // starts a job.
     this.runner.on?.('finished', this.onFinished)
+    // A queue moving is the whole of what a `work` trigger waits for. Like a
+    // path watcher, it has no occurrence to compute and no timer to arm. Serving
+    // is guarded and takes nothing when there is nothing to take, so the moves
+    // that change nothing — an item completing mid-drain — cost a lookup.
+    this.work?.on?.('changed', this.onWorkChanged)
 
+    // Also picks up what was left in the queues while Rota was not running: the
+    // store put the interrupted items back as pending when it loaded, and
+    // sync() serves whoever is waiting for them.
     this.sync()
 
     if (this.isPaused()) {
@@ -129,9 +188,12 @@ class Scheduler extends EventEmitter {
   stop() {
     this.started = false
     this.runner.off?.('finished', this.onFinished)
+    this.work?.off?.('changed', this.onWorkChanged)
     for (const key of [...this.watchers.keys()]) this.#unwatch(key)
     for (const { timer } of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
+    for (const timer of this.backoffTimers.values()) clearTimeout(timer)
+    this.backoffTimers.clear()
   }
 
   /**
@@ -204,6 +266,159 @@ class Scheduler extends EventEmitter {
       if (!watched.has(key)) this.#unwatch(key)
     }
 
+    // Whatever moved may have made a worker able to run again: the pause
+    // lifted, the session unlocked, its definition re-enabled. Serving is
+    // guarded and takes nothing when there is nothing to take, so this costs a
+    // map lookup in the ordinary case.
+    this.#serveWorkers()
+
+    this.emit('changed')
+  }
+
+  // --- the queues ---------------------------------------------------------------
+
+  /** Every job that consumes a queue, offered whatever is waiting in it. */
+  #serveWorkers() {
+    if (!this.work || !this.started) return
+    for (const job of this.store.getJobs()) {
+      if (!workTrigger(job)) continue
+      this.#serveWork(job).catch((err) => logger.error(`serving ${job.id} failed`, err))
+    }
+  }
+
+  /**
+   * Comes back to a queue when the item it is holding back falls due.
+   *
+   * Same shape as `#schedule` for a timed trigger, and for the same reason: an
+   * instant in the future, and a re-arming for delays longer than setTimeout
+   * accepts. Rebuilt from the queue each time rather than remembered, so an
+   * item cancelled or retried in the meantime moves the appointment.
+   */
+  #armBackoff(jobId) {
+    this.#clearBackoff(jobId)
+    const at = this.work?.nextAvailableAt(jobId) ?? null
+    if (at === null) return
+
+    const { delay, final } = timeoutFor(at, Date.now())
+    const timer = setTimeout(() => {
+      this.backoffTimers.delete(jobId)
+      if (!final) {
+        this.#armBackoff(jobId)
+        return
+      }
+      const job = this.store.getJob(jobId)
+      if (job) this.#serveWork(job).catch((err) => logger.error(`serving ${jobId} failed`, err))
+    }, delay)
+    timer.unref?.()
+    this.backoffTimers.set(jobId, timer)
+  }
+
+  #clearBackoff(jobId) {
+    const existing = this.backoffTimers.get(jobId)
+    if (!existing) return
+    clearTimeout(existing)
+    this.backoffTimers.delete(jobId)
+  }
+
+  /** The three rules every firing obeys, plus the job's own concurrency. */
+  #canServe(job) {
+    if (!this.started || this.isPaused() || !job.enabled) return false
+    if (this.#deferredForLock(job)) return false
+    if (!workTrigger(job)) return false
+    if (!job.execution.allowConcurrentRuns && this.runner.isRunning(job.id)) return false
+    return true
+  }
+
+  /**
+   * Works through a job's queue, item by item, until it runs dry.
+   *
+   * **The loop is here, and it is a consequence rather than a feature.** Nothing
+   * counts turns, nothing decides when to stop, and no flag turns it on: a job
+   * with a `work` trigger takes the next item as soon as it is done with the
+   * last, and an empty queue is what ends it. An item that fails leaves the
+   * queue for the length of its backoff, which is also what stops a worker from
+   * spinning on something that fails instantly.
+   *
+   * Re-entrance is held off for the whole loop: claiming is a write, and two
+   * serves that overlapped would both pass the concurrency check before either
+   * had taken anything.
+   */
+  async #serveWork(job) {
+    if (!this.work || this.serving.has(job.id)) return
+    this.serving.add(job.id)
+    try {
+      for (;;) {
+        // Re-read on every turn rather than closing over the definition: a job
+        // disabled, edited or deleted while its queue was draining must not have
+        // the rest of it run from a stale copy.
+        const current = this.store.getJob(job.id)
+        if (!current || !this.#canServe(current)) return
+
+        const item = await this.work.claim(current.id)
+        // Nothing to take. If something is only waiting out its backoff, this
+        // is where we undertake to come back for it.
+        if (!item) return this.#armBackoff(current.id)
+
+        const status = await this.#runItem(current, item)
+
+        // Two endings stop the loop rather than turning it. A run somebody
+        // stopped by hand is not an invitation to start the next one, and a job
+        // that turned out to be busy will not be less busy on the next turn.
+        // Both put their item back, and something else — an arrival, a resume —
+        // is what will pick the queue up again.
+        if (status === 'cancelled' || status === 'skipped-already-running') return
+      }
+    } finally {
+      this.serving.delete(job.id)
+    }
+  }
+
+  /**
+   * One item, from claim to outcome.
+   * @returns {Promise<string>} the status the execution ended as
+   */
+  async #runItem(job, item) {
+    // The attempt is counted now, not at the end: an execution interrupted by a
+    // crash has to have cost the item something, otherwise a job that brings
+    // Rota down takes the same item forever.
+    await this.work.markRunning(item.id, null)
+
+    this.#reanchor(job, Date.now())
+    this.emit('changed')
+
+    let entry = null
+    try {
+      entry = await this.runner.run(job, {
+        trigger: WORK_TRIGGER,
+        work: { id: item.id, input: item.input },
+      })
+    } catch (err) {
+      logger.error(`running ${job.id} failed`, err)
+    }
+
+    await this.#settleWork(job, item, entry)
+    this.sync()
+    return entry?.status ?? 'failed'
+  }
+
+  /** What the run made of the item. The mapping itself is the store's. */
+  async #settleWork(job, item, entry) {
+    const trigger = workTrigger(job)
+    const status = entry?.status ?? 'failed'
+    const output = `${entry?.stdout ?? ''}`.trim()
+
+    const settled = await this.work.settle(item.id, {
+      status,
+      result:
+        status === 'success' && output !== '' ? truncateToBytes(output, RESULT_BYTES).text : null,
+      error:
+        entry?.error ?? (entry ? `the execution ended as ${status}` : 'the execution never started'),
+      executionId: entry?.executionId ?? null,
+      maxAttempts: trigger?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+      backoffSeconds: trigger?.backoffSeconds ?? DEFAULT_BACKOFF_SECONDS,
+    })
+
+    if (settled) logger.info(`${job.id}: work item ${item.id} → ${settled.status}`)
     this.emit('changed')
   }
 

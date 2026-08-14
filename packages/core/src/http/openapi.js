@@ -52,6 +52,38 @@ const NOT_FOUND = {
   content: { 'application/json': { schema: ERROR_SCHEMA } },
 }
 
+const workItemSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    jobId: { type: 'string' },
+    status: {
+      type: 'string',
+      enum: ['pending', 'claimed', 'running', 'done', 'failed', 'cancelled'],
+    },
+    input: { type: 'object', description: 'What the job is handed. Reaches it as ROTA_WORK_INPUT, or as ${work.input} in an agent prompt.' },
+    result: { type: ['string', 'null'] },
+    error: { type: ['string', 'null'] },
+    attempts: { type: 'integer' },
+    availableAt: {
+      type: ['string', 'null'],
+      format: 'date-time',
+      description: 'Set while an item that failed is being held back; it is not served again before this.',
+    },
+    executionId: { type: ['string', 'null'] },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+}
+
+const workIdParam = {
+  name: 'id',
+  in: 'path',
+  required: true,
+  description: 'Work item identifier — the one Rota generated, or the one the caller gave.',
+  schema: { type: 'string' },
+}
+
 const jobIdParam = {
   name: 'id',
   in: 'path',
@@ -101,6 +133,86 @@ const OPERATIONS = [
     tag: 'Scheduler',
     summary: 'Resume the scheduler',
     responses: { 200: json({ type: 'object', properties: { paused: { type: 'boolean' } } }, 'Resumed.') },
+  },
+  {
+    method: 'get',
+    path: '/api/work',
+    tag: 'Work',
+    summary: 'List the queued work',
+    parameters: [
+      { name: 'jobId', in: 'query', required: false, schema: { type: 'string' } },
+      { name: 'status', in: 'query', required: false, schema: { type: 'string' } },
+    ],
+    responses: {
+      200: json({ type: 'object', properties: { items: { type: 'array', items: workItemSchema } } }, 'The items, oldest first.'),
+    },
+  },
+  {
+    method: 'post',
+    path: '/api/work',
+    tag: 'Work',
+    summary: 'Queue a piece of work for a job',
+    description:
+      'The job runs when it gets to it, one item at a time, and nothing is asked of a model to ' +
+      'discover an empty queue. Give an id of your own to make this idempotent: replaying the ' +
+      'same event then answers 409 instead of queueing the work twice.',
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['jobId'],
+            properties: {
+              jobId: { type: 'string' },
+              input: { type: 'object' },
+              id: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      201: json(workItemSchema, 'Queued.'),
+      409: json(ERROR_SCHEMA, 'An item already goes by that name.'),
+      422: json(ERROR_SCHEMA, 'Unknown job, or an input that will not do.'),
+    },
+  },
+  {
+    method: 'get',
+    path: '/api/work/{id}',
+    tag: 'Work',
+    summary: 'One work item',
+    parameters: [workIdParam],
+    responses: { 200: json(workItemSchema, 'The item.'), 404: NOT_FOUND },
+  },
+  {
+    method: 'post',
+    path: '/api/work/{id}/retry',
+    tag: 'Work',
+    summary: 'Put a finished item back in the queue',
+    description: 'Its attempts go back to zero: somebody looked at it and decided it deserved another go.',
+    parameters: [workIdParam],
+    responses: { 200: json(workItemSchema, 'Queued again.'), 404: NOT_FOUND },
+  },
+  {
+    method: 'post',
+    path: '/api/work/{id}/cancel',
+    tag: 'Work',
+    summary: 'Give up on an item without running it',
+    parameters: [workIdParam],
+    responses: { 200: json(workItemSchema, 'Cancelled.'), 404: NOT_FOUND },
+  },
+  {
+    method: 'delete',
+    path: '/api/work/{id}',
+    tag: 'Work',
+    summary: 'Remove an item outright',
+    parameters: [workIdParam],
+    responses: {
+      200: json({ type: 'object', properties: { removed: { type: 'string' } } }, 'Removed.'),
+      404: NOT_FOUND,
+    },
   },
   {
     method: 'get',
@@ -287,6 +399,12 @@ function buildSpec(http = {}) {
     servers: [{ url: `http://${http.listen ?? '127.0.0.1'}:${http.port ?? 47823}` }],
     tags: [
       { name: 'Jobs', description: 'List, run, stop, enable, read back.' },
+      {
+        name: 'Work',
+        description:
+          'The durable queues. Put an item on one and the job it names takes it when it gets ' +
+          'there, one at a time, until there is none left.',
+      },
       { name: 'Scheduler', description: 'The state of the engine itself.' },
       { name: 'Webhook', description: 'The one surface a third party is meant to reach.' },
     ],

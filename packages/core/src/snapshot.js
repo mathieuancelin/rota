@@ -23,12 +23,14 @@ const { describeWorkflow } = require('./runner/workflow')
  * @param {{getStatus: () => object}|null} [deps.notifier]
  * @param {{status: () => object}|null} [deps.discord]
  * @param {{status: () => object}|null} [deps.http]
+ * @param {{countsByJob: () => Map<string, object>}|null} [deps.work]
  */
 function buildSnapshot({
   store,
   scheduler = null,
   runner = null,
   state = null,
+  work = null,
   autostart = null,
   notifier = null,
   discord = null,
@@ -41,6 +43,10 @@ function buildSnapshot({
   const nextRunByJob = scheduler?.nextRunByJob() ?? new Map()
   const lastRunByJob = scheduler?.lastRunByJob() ?? new Map()
   const deferredJobIds = scheduler?.deferredJobIds() ?? new Set()
+  // Counts, never the items themselves: this snapshot is rebuilt on every state
+  // change and published four times a second, and a queue of a thousand items
+  // would ride along with each one. The view reads the list from /api/work.
+  const workByJob = work?.countsByJob() ?? new Map()
 
   const decoratedJobs = jobs.map((job) => ({
     ...job,
@@ -51,6 +57,7 @@ function buildSnapshot({
     nextRunAt: nextRunByJob.get(job.id) ?? null,
     lastRun: lastRunByJob.get(job.id) ?? null,
     deferredUntilUnlock: deferredJobIds.has(job.id),
+    work: workByJob.get(job.id) ?? null,
   }))
 
   const paused = Boolean(scheduler ? scheduler.isPaused() : config.schedulerPaused)
@@ -72,6 +79,16 @@ function buildSnapshot({
     jobs: decoratedJobs,
     runningExecutions: runner?.runningExecutions() ?? [],
     nextRuns,
+    // The whole queue in four numbers, for the navigation badge.
+    work: [...workByJob.values()].reduce(
+      (total, counts) => ({
+        pending: total.pending + counts.pending,
+        running: total.running + counts.claimed + counts.running,
+        failed: total.failed + counts.failed,
+        done: total.done + counts.done,
+      }),
+      { pending: 0, running: 0, failed: 0, done: 0 },
+    ),
     recentErrors,
     hasUnacknowledgedError: recentErrors.some(
       (error) => !acknowledgedAt || Date.parse(error.at) > Date.parse(acknowledgedAt),

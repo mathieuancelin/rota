@@ -25,6 +25,37 @@ const TRIGGER_LABELS = {
   agent: 'another job',
   discord: 'a keyword written in the Discord channel',
   webhook: 'an HTTP call on the webhook endpoint',
+  work: 'an item waiting in its queue',
+}
+
+// What a job writes to say where the queue item goes in its own words. The
+// dotted name cannot collide with a ${VARIABLE} secret, whose pattern refuses
+// the dot — the two resolvers can therefore ignore each other.
+const WORK_INPUT_TOKEN = '${work.input}'
+const WORK_ID_TOKEN = '${work.id}'
+
+// Said rather than left blank: a job whose prompt reads "process ${work.input}"
+// and is then run by hand must not send the model a sentence with a hole in it.
+const NO_WORK = '(no work item: this run did not come off the queue)'
+
+/**
+ * Replaces the ${work.*} references with the item this execution was handed.
+ *
+ * Expanded here rather than when the job is loaded, because the value is not a
+ * property of the definition: the same job, run twice, holds two different
+ * items. A text with no reference passes through untouched.
+ *
+ * @param {string} text
+ * @param {{id: string, input: object}|null} work
+ * @returns {string}
+ */
+function expandWork(text, work = null) {
+  if (typeof text !== 'string') return text
+  if (!text.includes(WORK_INPUT_TOKEN) && !text.includes(WORK_ID_TOKEN)) return text
+
+  const input = work ? JSON.stringify(work.input ?? {}, null, 2) : NO_WORK
+  const id = work ? work.id : NO_WORK
+  return text.split(WORK_INPUT_TOKEN).join(input).split(WORK_ID_TOKEN).join(id)
 }
 
 const touchesDisk = (toolNames) =>
@@ -39,6 +70,7 @@ const touchesDisk = (toolNames) =>
  * @param {boolean} options.sandboxed
  * @param {string[]} [options.toolNames] tools actually offered
  * @param {boolean} [options.subAgent] this agent was handed a task by another
+ * @param {{id: string, input: object}|null} [options.work] the queue item, if any
  * @returns {string}
  */
 function buildSystemPrompt({
@@ -49,10 +81,11 @@ function buildSystemPrompt({
   sandboxed,
   toolNames = [],
   subAgent = false,
+  work = null,
 }) {
   const sections = []
 
-  const own = expandDefaults(job.runner.agent.systemPrompt).trim()
+  const own = expandWork(expandDefaults(job.runner.agent.systemPrompt), work).trim()
   if (own !== '') sections.push(own)
 
   const context = [
@@ -121,4 +154,11 @@ function buildSystemPrompt({
   return sections.join('\n\n')
 }
 
-module.exports = { buildSystemPrompt, TRIGGER_LABELS }
+module.exports = {
+  buildSystemPrompt,
+  expandWork,
+  TRIGGER_LABELS,
+  WORK_INPUT_TOKEN,
+  WORK_ID_TOKEN,
+  NO_WORK,
+}

@@ -121,6 +121,7 @@ async function start() {
     scheduler: context.engine.scheduler,
     runner: context.engine.runner,
     state: context.engine.state,
+    work: context.engine.work,
     getSnapshot: snapshot,
     setPaused: (paused) => context.engine.setPaused(paused),
     publish,

@@ -21,7 +21,7 @@ const { createStyle } = require('./render')
 const VERSION = require('../package.json').version
 
 const FLAGS = new Set(['--json', '--remote', '--no-colour', '--no-color'])
-const VALUED = new Set(['--config-dir', '--token', '--url', '--limit'])
+const VALUED = new Set(['--config-dir', '--token', '--url', '--limit', '--input', '--id'])
 
 /**
  * Hand-written, and small enough to read in one sitting. The alternative is a
@@ -33,6 +33,8 @@ function parseArguments(argv) {
     token: null,
     url: null,
     limit: null,
+    input: null,
+    id: null,
     json: false,
     remote: false,
     colour: null,
@@ -59,6 +61,8 @@ function parseArguments(argv) {
       if (arg === '--config-dir') options.configDir = value
       else if (arg === '--token') options.token = value
       else if (arg === '--url') options.url = value
+      else if (arg === '--input') options.input = value
+      else if (arg === '--id') options.id = value
       else if (arg === '--limit') {
         const limit = Number.parseInt(value, 10)
         if (!Number.isInteger(limit) || limit <= 0) return { error: `--limit wants a positive number, got "${value}"` }
@@ -78,10 +82,14 @@ function parseArguments(argv) {
     positional.push(arg)
   }
 
-  const [name, argument, ...rest] = positional
-  if (rest.length > 0) return { error: `unexpected argument: ${rest[0]}` }
+  const [name, ...args] = positional
+  // How many a command takes is the command's business — `work` has
+  // sub-commands, everything else takes one identifier — so the arity is
+  // checked once the name has been resolved, not here.
+  const arity = byName.get(name)?.arity ?? 1
+  if (args.length > arity) return { error: `unexpected argument: ${args[arity]}` }
 
-  return { name, argument: argument ?? null, options, help, version }
+  return { name, argument: args[0] ?? null, arguments: args, options, help, version }
 }
 
 async function main(argv = process.argv.slice(2), io = {}) {
@@ -138,6 +146,8 @@ async function main(argv = process.argv.slice(2), io = {}) {
   const context = {
     paths: resolvePaths(options.configDir ? path.resolve(options.configDir) : undefined),
     argument,
+    // Everything after the command name. Only `work` reads past the first.
+    arguments: parsed.arguments ?? [],
     options,
     style: createStyle(colour && !options.json),
     exitCode: 0,

@@ -89,7 +89,7 @@ function buildSandboxCommand({ job, dockerPath, scriptPath, executionId = null, 
  * @param {{executionId: string}} context
  * @param {Record<string, string|undefined>} [source] the host's environment
  */
-function sandboxEnv(job, { executionId }, source = process.env) {
+function sandboxEnv(job, { executionId, work = null }, source = process.env) {
   const env = {}
   for (const key of SANDBOX_ENV_ALLOWLIST) {
     if (source[key] != null) env[key] = source[key]
@@ -100,6 +100,15 @@ function sandboxEnv(job, { executionId }, source = process.env) {
   // into a sandbox must not discover that its variables were renamed on the way.
   env.TICKTRAY_JOB_ID = job.id
   env.TICKTRAY_EXECUTION_ID = executionId
+  // The queue item reaches a sandboxed job exactly as it reaches any other. It
+  // is one of the few things that has to cross the boundary: without it, a
+  // worker in a container would have no idea what it was woken for.
+  if (work) {
+    env.ROTA_WORK_ITEM_ID = work.id
+    env.ROTA_WORK_INPUT = JSON.stringify(work.input ?? {})
+    env.TICKTRAY_WORK_ITEM_ID = env.ROTA_WORK_ITEM_ID
+    env.TICKTRAY_WORK_INPUT = env.ROTA_WORK_INPUT
+  }
   return { ...env, ...job.runner.environment }
 }
 

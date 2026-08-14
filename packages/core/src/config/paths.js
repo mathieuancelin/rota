@@ -118,6 +118,10 @@ function resolvePaths(configDir = resolveConfigDir()) {
     memoryDir: path.join(configDir, 'memory'),
     // Conversations, one file per thread: conversations/<id>/<conversation>.json.
     conversationsDir: path.join(configDir, 'conversations'),
+    // The work queues: work/<job>/<item>.json, one file per item. Unlike the
+    // history, this is not a record of what happened — it is what has not
+    // happened yet, and losing it loses work.
+    workDir: path.join(configDir, 'work'),
     historyDir: path.join(configDir, 'history'),
     outputsDir: path.join(configDir, 'history', 'outputs'),
     logsDir: path.join(configDir, 'logs'),
@@ -137,6 +141,7 @@ async function ensureStructure(paths = resolvePaths()) {
     paths.agentsDir,
     paths.memoryDir,
     paths.conversationsDir,
+    paths.workDir,
     paths.historyDir,
     paths.outputsDir,
     paths.logsDir,

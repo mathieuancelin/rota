@@ -35,6 +35,7 @@ const { pruneInlineScripts } = require('./runner/inline')
 const { Runner } = require('./runner')
 const { Scheduler } = require('./scheduler')
 const { StateStore } = require('./state-store')
+const { WorkStore } = require('./work/store')
 const { buildSnapshot } = require('./snapshot')
 const { watchConfig } = require('./config/watcher')
 
@@ -88,6 +89,12 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
   const state = new StateStore(paths.stateFile)
   await state.load()
 
+  // Loaded before anything can run: its load() is also what puts back the items
+  // an interrupted execution left claimed, and a worker must not be offered one
+  // of those as though it were fresh.
+  const work = new WorkStore(paths.workDir)
+  await work.load()
+
   const history = new HistoryStore(paths, {
     getDefaults: () => store.getConfig().defaults,
   })
@@ -113,8 +120,8 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
     onStatusChange: () => engine.emit('changed'),
   })
 
-  const runner = new Runner({ store, history, ui: agentUi, discord })
-  const scheduler = new Scheduler({ store, state, runner })
+  const runner = new Runner({ store, history, ui: agentUi, discord, work })
+  const scheduler = new Scheduler({ store, state, runner, work })
 
   // The launcher loops: the runner needs it, it needs the scheduler, which needs
   // the runner. We put it in place once the three are built.
@@ -136,6 +143,7 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
     runner,
     state,
     history,
+    work,
     chat,
     setPaused,
     onStatusChange: () => engine.emit('changed'),
@@ -216,6 +224,10 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
 
   scheduler.on('changed', () => engine.emit('changed'))
 
+  // A queue that moves is a state change like any other: the interface shows
+  // what is waiting per job, and the publication is throttled downstream.
+  work.on('changed', () => engine.emit('changed'))
+
   store.on('change', async () => {
     logIssues()
     // Before the engine's own reaction: a shell has settings of its own to
@@ -243,6 +255,7 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
     await chat.prune(ids).catch((err) => logger.error('pruning conversations', err))
     state.prune(ids)
     await history.prune(ids).catch((err) => logger.error('pruning history', err))
+    await work.prune(ids).catch((err) => logger.error('pruning the work queues', err))
     await pruneInlineScripts(paths, ids).catch((err) => logger.error('pruning inline code', err))
     await agentMemory
       .prune(paths.memoryDir, ids)
@@ -265,6 +278,7 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
     store,
     state,
     history,
+    work,
     runner,
     scheduler,
     chat,
@@ -318,7 +332,17 @@ async function createEngine({ paths = resolvePaths(), ui = null } = {}) {
      * notifications are permitted — and a daemon simply does not.
      */
     snapshot({ autostart = null, notifier = null } = {}) {
-      return buildSnapshot({ store, scheduler, runner, state, autostart, notifier, discord, http })
+      return buildSnapshot({
+        store,
+        scheduler,
+        runner,
+        state,
+        work,
+        autostart,
+        notifier,
+        discord,
+        http,
+      })
     },
   })
 

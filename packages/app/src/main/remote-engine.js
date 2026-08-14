@@ -217,6 +217,27 @@ function createRemoteEngine({ paths, remote }) {
           .catch(() => null),
     },
 
+    // The queues, over the same API the CLI uses. Nothing is cached here: the
+    // view asks when it opens and after every action, which is what it would do
+    // against a local store too.
+    work: {
+      list: (filter = {}) => {
+        const query = new URLSearchParams()
+        if (filter.jobId) query.set('jobId', filter.jobId)
+        if (filter.status) query.set('status', filter.status)
+        const suffix = query.toString() ? `?${query}` : ''
+        return call('GET', `/api/v1/work${suffix}`).then((answer) => answer.items)
+      },
+      create: (item) =>
+        call('POST', '/api/v1/work', item).then(
+          (created) => ({ ok: true, item: created }),
+          (err) => ({ ok: false, error: err.message }),
+        ),
+      retry: (id) => call('POST', `/api/v1/work/${encodeURIComponent(id)}/retry`),
+      cancel: (id) => call('POST', `/api/v1/work/${encodeURIComponent(id)}/cancel`),
+      remove: (id) => call('DELETE', `/api/v1/work/${encodeURIComponent(id)}`).then(() => true),
+    },
+
     chat: {
       list: (jobId) => call('GET', `/api/v1/jobs/${encodeURIComponent(jobId)}/chats`).then((a) => a.chats),
       create: (jobId) => attempt(() => call('POST', `/api/v1/jobs/${encodeURIComponent(jobId)}/chats`)),

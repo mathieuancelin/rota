@@ -55,9 +55,12 @@ class Runner extends EventEmitter {
    * @param {{append: (entry: object) => Promise<object>}} deps.history
    * @param {{report: Function, ask: Function, confirm: Function}} [deps.ui]
    *        windows available to agent jobs
+   * @param {import('../work/store').WorkStore|null} [deps.work] the queues, for
+   *        the two tools that speak about them
    */
-  constructor({ store, history, ui = createUnavailableUi(), discord = null }) {
+  constructor({ store, history, ui = createUnavailableUi(), discord = null, work = null }) {
     super()
+    this.work = work
     this.store = store
     this.history = history
     this.ui = ui
@@ -157,9 +160,14 @@ class Runner extends EventEmitter {
    *        the history, nor the notifications, nor the list of running executions
    *        — the workflow carries all of that for it. It nevertheless stays in
    *        `running`, so that a referenced job's concurrency guard keeps seeing it.
+   * @param {{id: string, input: object}|null} [options.work] the queue item this
+   *        run was handed. It reaches a script as two environment variables and
+   *        an agent as ${work.input}; the runner itself does no more with it than
+   *        carry it, and it is the scheduler that decides the item's fate from
+   *        the outcome.
    * @returns {Promise<object>} history entry
    */
-  async run(job, { trigger = 'schedule', nested = null } = {}) {
+  async run(job, { trigger = 'schedule', nested = null, work = null } = {}) {
     if (
       !nested?.skipConcurrency &&
       !job.execution.allowConcurrentRuns &&
@@ -185,13 +193,13 @@ class Runner extends EventEmitter {
       // the main process, because it must be able to open windows and wait for
       // the answer.
       if (job.runner.type === 'agent') {
-        return this.#runAgent(job, { trigger, executionId, nested })
+        return this.#runAgent(job, { trigger, executionId, nested, work })
       }
 
       // A workflow has no command either: what it starts are other executions,
       // one after the other.
       if (job.runner.type === 'workflow') {
-        return this.#runWorkflow(job, { trigger, executionId, nested })
+        return this.#runWorkflow(job, { trigger, executionId, nested, work })
       }
 
       // The inline code is written first of all: it is the file the command will
@@ -212,7 +220,7 @@ class Runner extends EventEmitter {
         }
       }
 
-      const resolved = this.#resolveCommand(job, inlineScript, executionId)
+      const resolved = this.#resolveCommand(job, inlineScript, executionId, work)
       if (!resolved.ok) {
         return this.#finalize(
           this.#syntheticEntry(job, trigger, {
@@ -241,6 +249,7 @@ class Runner extends EventEmitter {
         trigger,
         executionId,
         nested,
+        work,
         command: resolved.command,
         scriptPath,
         dockerPath: resolved.dockerPath ?? null,
@@ -250,7 +259,7 @@ class Runner extends EventEmitter {
     }
   }
 
-  #resolveCommand(job, inlineScript, executionId) {
+  #resolveCommand(job, inlineScript, executionId, work = null) {
     const scriptPath = inlineScript ?? job.runner.script
 
     if (isSandboxed(job)) {
@@ -265,7 +274,7 @@ class Runner extends EventEmitter {
           dockerPath: docker.path,
           scriptPath,
           executionId,
-          environment: sandboxEnv(job, { executionId }),
+          environment: sandboxEnv(job, { executionId, work }),
         }),
       }
     }
@@ -278,7 +287,10 @@ class Runner extends EventEmitter {
     return { ok: true, command: buildCommand(job, { bunPath: bun.path, inlineScript }) }
   }
 
-  #spawn(job, { trigger, executionId, command, scriptPath, dockerPath = null, nested = null }) {
+  #spawn(
+    job,
+    { trigger, executionId, command, scriptPath, dockerPath = null, nested = null, work = null },
+  ) {
     const startedAt = Date.now()
     const commandLine = formatCommand(command)
     // With no declared directory, the script's — for an inline job, the folder of
@@ -310,7 +322,7 @@ class Runner extends EventEmitter {
     try {
       child = spawn(command.command, command.args, {
         cwd,
-        env: dockerPath ? buildDockerEnv() : buildEnv(job, { executionId }),
+        env: dockerPath ? buildDockerEnv() : buildEnv(job, { executionId, work }),
         stdio: ['ignore', 'pipe', 'pipe'],
         // Dedicated process group: allows killing the whole descent.
         detached: true,
@@ -448,7 +460,7 @@ class Runner extends EventEmitter {
    * process: here the stop is an `AbortController`, and the exit code is a
    * convention rather than a real process status.
    */
-  #runAgent(job, { trigger, executionId, nested = null }) {
+  #runAgent(job, { trigger, executionId, nested = null, work = null }) {
     const startedAt = Date.now()
     const { agent } = job.runner
     const commandLine = `agent ${agent.model} @ ${agent.api.baseUrl}`
@@ -502,6 +514,8 @@ class Runner extends EventEmitter {
           paths: this.store.paths,
           executionId,
           trigger,
+          work,
+          workStore: this.work,
           ui: this.ui,
           // Nobody at the screen means the tools that wait for an answer are
           // withdrawn before the turn rather than failing in the middle of it,
@@ -581,7 +595,7 @@ class Runner extends EventEmitter {
    * goes down to the running step: stopping a workflow without stopping the
    * process it waits on would not stop it.
    */
-  #runWorkflow(job, { trigger, executionId, nested = null }) {
+  #runWorkflow(job, { trigger, executionId, nested = null, work = null }) {
     const startedAt = Date.now()
     const steps = job.runner.workflow.steps
     const commandLine = describeWorkflow(job)
@@ -669,6 +683,11 @@ class Runner extends EventEmitter {
           execute: (stepJob, { skipConcurrency, onOutput }) =>
             this.run(stepJob, {
               trigger: 'workflow',
+              // Every step is handed the same item as the workflow itself. A
+              // chain that came off a queue is working on one thing, and a step
+              // that could not see which would be the only part of it that
+              // could not.
+              work,
               nested: {
                 skipConcurrency,
                 onOutput,

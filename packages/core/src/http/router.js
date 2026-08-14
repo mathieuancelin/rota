@@ -126,6 +126,8 @@ async function handleApi(request, segments, deps, config) {
     return ok({ paused: segments[1] === 'pause' })
   }
 
+  if (segments[0] === 'work') return handleWork(request, segments.slice(1), deps)
+
   if (segments[0] !== 'jobs') return NOT_FOUND
 
   const nextRuns = scheduler.nextRunByJob()
@@ -246,6 +248,67 @@ async function handleChat(request, job, { chat }) {
   if (!posted.ok) return json(422, { error: posted.error })
   if (!posted.turn.ok) return json(502, { error: posted.turn.error })
   return ok({ chatId: opened.chatId, reply: posted.turn.content })
+}
+
+// --- work queues ----------------------------------------------------------------
+
+/**
+ * The queues, over HTTP.
+ *
+ * This is the door the whole feature exists for: something outside Rota — a
+ * GitHub integration, a script, another machine — puts work on the queue, and a
+ * worker picks it up without anybody being at the screen. The rest of the
+ * surface is convenience; this route is the point.
+ */
+async function handleWork(request, segments, deps) {
+  const { work, store } = deps
+  if (!work) return NOT_FOUND
+  const { method } = request
+
+  if (segments.length === 0 && method === 'GET') {
+    const jobId = request.query.get('jobId')
+    const status = request.query.get('status')
+    return ok({ items: work.list({ jobId: jobId || null, status: status || null }) })
+  }
+
+  if (segments.length === 0 && method === 'POST') {
+    const body = request.body ?? {}
+    // A queue for a job that is not there would sit unread forever, and the
+    // caller would have no way of finding that out.
+    if (!store.getJob(body.jobId)) return json(422, { error: `unknown job: ${body.jobId}` })
+
+    const created = await work.create({
+      jobId: body.jobId,
+      input: body.input ?? {},
+      id: typeof body.id === 'string' ? body.id : null,
+    })
+    // 409 rather than 422 for a name already taken: the caller replaying the
+    // same event has done nothing wrong, and that status is what tells it so.
+    if (!created.ok) {
+      return json(created.error.includes('already exists') ? 409 : 422, { error: created.error })
+    }
+    return json(201, created.item)
+  }
+
+  const item = segments.length >= 1 ? work.get(segments[0]) : null
+  if (!item) return NOT_FOUND
+
+  if (segments.length === 1 && method === 'GET') return ok(item)
+
+  if (segments.length === 1 && method === 'DELETE') {
+    await work.remove(item.id)
+    return ok({ removed: item.id })
+  }
+
+  if (segments.length === 2 && segments[1] === 'retry' && method === 'POST') {
+    return ok(await work.retry(item.id))
+  }
+
+  if (segments.length === 2 && segments[1] === 'cancel' && method === 'POST') {
+    return ok(await work.cancel(item.id))
+  }
+
+  return NOT_FOUND
 }
 
 // --- webhook -------------------------------------------------------------------

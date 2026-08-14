@@ -1,0 +1,56 @@
+{
+  "$schema": "https://rota.local/schemas/job.schema.json",
+  "id": "file-relecture",
+  "name": "File de relecture",
+  "description": "Relit un article à la fois, pris dans sa file, et s'arrête quand il n'y en a plus. Alimente la file avec « rotactl work add file-relecture --input '{\"fichier\":\"notes/x.md\"}' » ou en postant sur /api/work.",
+  "enabled": false,
+  "triggers": [
+    {
+      "type": "work",
+      "maxAttempts": 3,
+      "backoffSeconds": 120
+    }
+  ],
+  "runner": {
+    "type": "agent",
+    "workingDirectory": "/Users/moi/notes",
+    "args": [],
+    "environment": {},
+    "agent": {
+      "systemPrompt": "${defaults.system_prompt}\n\n# Cette tâche\n\nTu relis des notes une par une. Chaque exécution ne s'occupe que d'une seule : celle qu'on te donne. Ne va pas chercher les autres, elles ont leur tour.",
+      "prompt": "Relis la note désignée ci-dessous.\n\n${work.input}\n\nOuvre le fichier indiqué, puis écris à côté de lui un fichier de même nom suffixé « .relu.md » contenant : un résumé de cinq lignes, les points qui te paraissent faux ou datés, et les questions restées sans réponse.\n\nSi le fichier n'existe pas ou n'est pas lisible, n'insiste pas et n'essaie pas de le deviner : appelle work_fail en disant ce qui manque. L'item ne sera pas rejoué, ce qui est ce qu'on veut pour un fichier qui n'existe pas.\n\nSi la note en cite une autre du même dossier qui mériterait aussi une relecture, mets-la dans la file avec work_create en nommant l'item d'après le chemin du fichier — un même fichier ne sera ainsi jamais mis deux fois.\n\nTermine par une ligne disant ce que tu as écrit.",
+      "model": "gemma4:latest",
+      "reasoningEffort": "medium",
+      "maxIterations": 25,
+      "api": {
+        "baseUrl": "http://127.0.0.1:11434/v1",
+        "headers": {},
+        "timeoutSeconds": 120
+      },
+      "tools": {
+        "enabled": [
+          "file_read",
+          "file_list",
+          "file_write",
+          "todo",
+          "work_create",
+          "work_fail"
+        ],
+        "jobs": { "allow": ["file-relecture"] }
+      },
+      "memory": { "enabled": false }
+    }
+  },
+  "execution": {
+    "timeoutSeconds": 600,
+    "allowConcurrentRuns": false,
+    "catchUpOnWake": true
+  },
+  "notifications": {
+    "onStart": false,
+    "onSuccess": false,
+    "onChange": false,
+    "onError": true
+  },
+  "history": { "enabled": true, "retainExecutions": 500 }
+}

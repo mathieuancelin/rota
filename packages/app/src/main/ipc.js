@@ -37,6 +37,11 @@ const CHANNELS = {
   OUTPUT_READ: 'rota:output:read',
   ERRORS_ACKNOWLEDGE: 'rota:errors:acknowledge',
   ERRORS_CLEAR: 'rota:errors:clear',
+  WORK_LIST: 'rota:work:list',
+  WORK_CREATE: 'rota:work:create',
+  WORK_RETRY: 'rota:work:retry',
+  WORK_CANCEL: 'rota:work:cancel',
+  WORK_DELETE: 'rota:work:delete',
   SCHEDULER_SET_PAUSED: 'rota:scheduler:setPaused',
   CONFIG_PATCH: 'rota:config:patch',
   // The HTTP server's token is drawn here rather than in the renderer: it is
@@ -100,6 +105,7 @@ function registerIpc({
   scheduler,
   runner,
   state,
+  work = null,
   getSnapshot,
   setPaused,
   publish,
@@ -283,6 +289,43 @@ function registerIpc({
   })
 
   ipcMain.handle(CHANNELS.OUTPUT_READ, async (_event, relative) => history.readOutput(relative))
+
+  // The queues. Reading is a call rather than part of the snapshot: the
+  // snapshot carries the counts, which is what the badges need, and a queue of
+  // a thousand items has no business riding along with every state change.
+  ipcMain.handle(CHANNELS.WORK_LIST, async (_event, filter = {}) => {
+    if (!work) return []
+    return work.list({
+      jobId: typeof filter.jobId === 'string' ? assertJobId(filter.jobId) : null,
+      status: typeof filter.status === 'string' ? filter.status : null,
+    })
+  })
+
+  ipcMain.handle(CHANNELS.WORK_CREATE, async (_event, item = {}) => {
+    if (!work) return { ok: false, error: 'the queues are not available' }
+    assertJobId(item.jobId)
+    const created = await work.create({
+      jobId: item.jobId,
+      input: item.input ?? {},
+      id: typeof item.id === 'string' && item.id !== '' ? item.id : null,
+    })
+    publish()
+    return created
+  })
+
+  for (const [channel, method] of [
+    [CHANNELS.WORK_RETRY, 'retry'],
+    [CHANNELS.WORK_CANCEL, 'cancel'],
+    [CHANNELS.WORK_DELETE, 'remove'],
+  ]) {
+    ipcMain.handle(channel, async (_event, id) => {
+      if (!work) return { ok: false, error: 'the queues are not available' }
+      if (typeof id !== 'string' || id === '') throw new Error('Invalid work item identifier')
+      await work[method](id)
+      publish()
+      return { ok: true }
+    })
+  }
 
   ipcMain.handle(CHANNELS.ERRORS_CLEAR, async () => {
     state.clearErrors()

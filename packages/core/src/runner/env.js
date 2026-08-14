@@ -26,7 +26,12 @@ function withLegacyNames(env) {
   return legacy
 }
 
-function buildEnv(job, { executionId }) {
+/**
+ * @param {object} job
+ * @param {{executionId: string, work?: {id: string, input: object}|null}} context
+ *   `work` is the queue item this execution was handed, when it came off one.
+ */
+function buildEnv(job, { executionId, work = null }) {
   const env = { PATH: childPath() }
   for (const key of ENV_ALLOWLIST) {
     if (process.env[key] != null) env[key] = process.env[key]
@@ -34,6 +39,12 @@ function buildEnv(job, { executionId }) {
   // Lets a script correlate its own traces with the history.
   env.ROTA_JOB_ID = job.id
   env.ROTA_EXECUTION_ID = executionId
+  // Absent, rather than empty, when the run came from anywhere else: a script
+  // tests for the variable to know whether it was handed something to work on.
+  if (work) {
+    env.ROTA_WORK_ITEM_ID = work.id
+    env.ROTA_WORK_INPUT = JSON.stringify(work.input ?? {})
+  }
   return { ...env, ...withLegacyNames(env), ...job.runner.environment }
 }
 

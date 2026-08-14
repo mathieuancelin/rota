@@ -71,30 +71,36 @@ export function deletePath(target, path) {
 
 export const TRIGGER_SEEDS = {
   interval: {
-    drop: ['expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'],
+    drop: ['expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'],
     seed: { every: 15, unit: 'minutes' },
   },
   cron: {
-    drop: ['every', 'unit', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'],
+    drop: ['every', 'unit', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'],
     seed: { expression: '0 9 * * 1-5' },
   },
-  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'], seed: {} },
-  discord: { drop: ['every', 'unit', 'expression', 'token', 'event', 'job', 'on', 'path', 'settleSeconds', 'at'], seed: { keyword: '' } },
+  webhook: { drop: ['every', 'unit', 'expression', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'], seed: {} },
+  discord: { drop: ['every', 'unit', 'expression', 'token', 'event', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'], seed: { keyword: '' } },
   power: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'job', 'on', 'path', 'settleSeconds', 'at'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'],
     seed: { event: 'wake' },
   },
   path: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'at'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'at', 'maxAttempts', 'backoffSeconds'],
     seed: { path: '' },
   },
   once: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'maxAttempts', 'backoffSeconds'],
     seed: { at: '' },
   },
   after: {
-    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'path', 'settleSeconds', 'at'],
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'],
     seed: { job: '', on: 'success' },
+  },
+  work: {
+    drop: ['every', 'unit', 'expression', 'token', 'keyword', 'event', 'job', 'on', 'path', 'settleSeconds', 'at', 'maxAttempts', 'backoffSeconds'],
+    // Neither field is required: a queue with no policy of its own uses the
+    // defaults, and an empty `{ type: "work" }` is the ordinary case.
+    seed: {},
   },
 }
 

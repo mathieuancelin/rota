@@ -520,6 +520,7 @@ function describeTrigger(trigger) {
     const on = trigger.on ?? 'success'
     return on === 'any' ? `after ${trigger.job}` : `after ${trigger.job} ${on}`
   }
+  if (trigger.type === 'work') return 'when work is waiting'
 
   const unit = UNIT_LABELS[trigger.unit] ?? trigger.unit
   // The singular drops the "s": "every minute", not "every 1 minutes".

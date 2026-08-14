@@ -5,6 +5,7 @@ import { useAppState } from './state.js'
 import Dashboard from './views/Dashboard.jsx'
 import JobList from './views/JobList.jsx'
 import Settings from './views/Settings.jsx'
+import Work from './views/Work.jsx'
 
 // Monaco weighs more than the rest of the interface put together. Loading it on
 // demand avoids paying for its parsing on every startup, for a view one only
@@ -14,6 +15,7 @@ const JobEditor = lazy(() => import('./views/JobEditor.jsx'))
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'jobs', label: 'Jobs' },
+  { id: 'work', label: 'Work' },
   { id: 'settings', label: 'Settings' },
 ]
 
@@ -99,6 +101,10 @@ export default function App() {
           </Suspense>
         )}
 
+        {route.view === 'work' && (
+          <Work state={state} onOpenJob={(jobId) => setRoute(openJob(jobId))} />
+        )}
+
         {route.view === 'settings' && <Settings state={state} />}
       </main>
     </>
@@ -120,6 +126,11 @@ function TitleBar({ state, active, onSelect }) {
             onClick={() => onSelect(tab.id)}
           >
             {tab.label}
+            {/* Only what is waiting: a count of what is done would never go
+                back down, and a badge that only ever grows stops being read. */}
+            {tab.id === 'work' && state.work?.pending > 0 && (
+              <span className="badge">{state.work.pending}</span>
+            )}
           </button>
         ))}
       </nav>

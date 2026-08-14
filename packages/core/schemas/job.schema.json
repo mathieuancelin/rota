@@ -70,8 +70,8 @@
         ],
         "properties": {
           "type": {
-            "enum": ["interval", "cron", "webhook", "discord", "power", "after", "path", "once"],
-            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish. path waits for a file or a directory to change. once names a single instant and is spent afterwards."
+            "enum": ["interval", "cron", "webhook", "discord", "power", "after", "path", "once", "work"],
+            "description": "interval counts from the end of the previous execution: a job slower than its interval never stacks on top of itself, but the clock drifts. cron names absolute instants, aligned to the minute and independent of how long executions take. webhook waits for an HTTP call. discord waits for a keyword in the channel. power waits for the machine to come back: waking, or the screen being unlocked. after waits for another job to finish. path waits for a file or a directory to change. once names a single instant and is spent afterwards. work waits for an item in the job's queue, and takes them one at a time until there are none left — which is how a job becomes a worker."
           },
           "enabled": {
             "type": "boolean",
@@ -125,6 +125,18 @@
             "description": "For the path type: how long the directory must be quiet before the job starts. Absent, two seconds. Raise it for something that writes in long bursts. Deliberately without a schema default, which would be written into every trigger of every type.",
             "minimum": 1,
             "maximum": 3600
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "description": "For the work type: how many times an item may be tried before it is given up on. Absent, three. The ceiling belongs to whoever consumes the queue rather than to the item, so that something filling the queue from outside does not get to decide how hard this machine tries.",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "backoffSeconds": {
+            "type": "integer",
+            "description": "For the work type: how long a failed item is held back before it is served again, doubling at each attempt — 60, 120, 240. Absent, sixty. This delay is also what keeps a worker from spinning: an item that fails instantly would otherwise come straight back, and each turn of that loop costs a model call.",
+            "minimum": 1,
+            "maximum": 86400
           },
           "on": {
             "type": "string",
@@ -251,7 +263,9 @@
         "confirm",
         "signal_change",
         "run_job",
-        "sub_agent"
+        "sub_agent",
+        "work_create",
+        "work_fail"
       ]
     },
     "runner": {
@@ -390,7 +404,7 @@
               "properties": {
                 "enabled": {
                   "type": "array",
-                  "description": "fetch: HTTP calls. exec: a command and its arguments, no shell. shell: a command line handed to sh -c. file_read, file_list, file_write, file_del: access to the working directory. todo: an in-memory task list. memory: persistent memory between executions — the system prompt lists its keys, the tools read and write the values. report: a markdown report window. report_discord: a report sent to the Discord webhook declared in the global settings. ask_user, confirm: blocking questions. signal_change: reports a real effect, for onChange notifications. run_job: triggers another Rota job, or its own after a delay. sub_agent: delegates a task to a second agent of this same job, which inherits the model and the tools and answers back.",
+                  "description": "fetch: HTTP calls. exec: a command and its arguments, no shell. shell: a command line handed to sh -c. file_read, file_list, file_write, file_del: access to the working directory. todo: an in-memory task list. memory: persistent memory between executions — the system prompt lists its keys, the tools read and write the values. report: a markdown report window. report_discord: a report sent to the Discord webhook declared in the global settings. ask_user, confirm: blocking questions. signal_change: reports a real effect, for onChange notifications. run_job: triggers another Rota job, or its own after a delay. sub_agent: delegates a task to a second agent of this same job, which inherits the model and the tools and answers back. work_create: queues a piece of work for a job, to be handled later in an execution of its own. work_fail: gives up for good on the queue item being processed — claiming, starting and completing it are Rota's business, not the model's.",
                   "items": { "$ref": "#/definitions/toolName" },
                   "uniqueItems": true,
                   "default": ["fetch", "file_read", "file_list", "todo", "memory", "report"]

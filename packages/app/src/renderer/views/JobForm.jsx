@@ -143,6 +143,8 @@ const TOOL_LABELS = [
   ['signal_change', 'signal_change — report a real effect'],
   ['run_job', 'run_job — trigger a job, or its own after a delay'],
   ['sub_agent', 'sub_agent — delegate a task to a second agent of this job'],
+  ['work_create', 'work_create — queue work for a job, handled later on its own'],
+  ['work_fail', 'work_fail — give up for good on the queue item being processed'],
 ]
 
 const UNITS = [
@@ -488,6 +490,7 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
             <option value="after">Another job finished</option>
             <option value="path">A file or directory changed</option>
             <option value="once">Once, at a given moment</option>
+            <option value="work">Work is waiting in its queue</option>
           </select>
         </Field>
         <button type="button" className="link" onClick={onRemove} title="Remove this trigger">
@@ -521,6 +524,18 @@ function Trigger({ job, onChange, index, trigger, onRemove }) {
           <Note>
             A Mac wakes at the lock screen, before anybody has typed anything. Pick the
             unlock when the job needs the keychain, the network as you left it, or you.
+          </Note>
+        </>
+      )}
+      {type === 'work' && (
+        <>
+          <Numeric {...props} path={at('maxAttempts')} label="Attempts at most" />
+          <Numeric {...props} path={at('backoffSeconds')} label="Backoff (seconds)" />
+          <Note>
+            The job takes its items one at a time until the queue is empty, then stops — no
+            model is asked anything to discover there is nothing to do. An item that fails
+            leaves the queue for the backoff, doubling each time, and is given up on past the
+            ceiling. Queue work with <code>rotactl work add</code> or POST /api/work.
           </Note>
         </>
       )}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://rota.local/schemas/job.schema.json",
+  "id": "file-vignettes",
+  "name": "File de vignettes",
+  "description": "Un worker sans modèle : il lit l'item dans ROTA_WORK_INPUT et fabrique la vignette. Un job de file n'a pas à être un agent — c'est Rota qui prend l'item et le clôt selon le code de sortie.",
+  "enabled": false,
+  "triggers": [
+    {
+      "type": "work",
+      "maxAttempts": 2,
+      "backoffSeconds": 30
+    }
+  ],
+  "runner": {
+    "type": "bun-inline",
+    "workingDirectory": "/Users/moi/images",
+    "args": [],
+    "environment": {},
+    "code": "// L'item arrive dans l'environnement : son identifiant, et son contenu en JSON.\n// Les deux variables sont absentes quand l'exécution ne vient pas d'une file —\n// c'est ainsi qu'on distingue les deux situations.\nconst id = process.env.ROTA_WORK_ITEM_ID\nif (!id) {\n  console.error(\"lancé hors file : rien à faire\")\n  process.exit(1)\n}\n\nconst { image, largeur = 640 } = JSON.parse(process.env.ROTA_WORK_INPUT)\nconsole.log(`item ${id} — ${image} en ${largeur} px`)\n\nif (!(await Bun.file(image).exists())) {\n  // Sortie non nulle : Rota compte la tentative, met l'item de côté le temps du\n  // backoff, puis abandonne au plafond. Rien à écrire dans la file nous-mêmes.\n  console.error(`introuvable : ${image}`)\n  process.exit(1)\n}\n\nconst sortie = image.replace(/(\\.[^.]+)$/, `.${largeur}$1`)\nconst { exitCode, stderr } = Bun.spawnSync(['sips', '-Z', String(largeur), image, '--out', sortie])\nif (exitCode !== 0) {\n  console.error(stderr.toString())\n  process.exit(exitCode)\n}\n\n// La dernière sortie est gardée comme résultat de l'item, visible dans la vue\n// Work sans avoir à ouvrir l'exécution.\nconsole.log(`écrit ${sortie}`)\n"
+  },
+  "execution": {
+    "timeoutSeconds": 120,
+    "allowConcurrentRuns": false,
+    "catchUpOnWake": true
+  },
+  "notifications": {
+    "onStart": false,
+    "onSuccess": false,
+    "onChange": false,
+    "onError": true
+  },
+  "history": { "enabled": true, "retainExecutions": 200 }
+}

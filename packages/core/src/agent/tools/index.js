@@ -17,6 +17,7 @@ const { todoRead, todoAdd, todoDel, todoClear } = require('./todo')
 const { memoryList, memoryRead, memoryWrite, memoryDel } = require('./memory')
 const { report, askUser, confirm, signalChange } = require('./interact')
 const { subAgent } = require('./subagent')
+const { workCreate, workFail } = require('./work')
 
 const CATALOG = {
   fetch: [fetchTool],
@@ -35,6 +36,8 @@ const CATALOG = {
   signal_change: [signalChange],
   run_job: [runJob],
   sub_agent: [subAgent],
+  work_create: [workCreate],
+  work_fail: [workFail],
 }
 
 // Tools that suspend the execution waiting for a human answer. `report` is not

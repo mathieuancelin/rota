@@ -23,7 +23,7 @@ const { MAX_TRIGGERS_PER_RUN } = require('./jobs')
 const { runToolLoop, parseArguments } = require('./loop')
 const { connectAll } = require('./mcp')
 const memory = require('./memory')
-const { buildSystemPrompt } = require('./prompt')
+const { buildSystemPrompt, expandWork } = require('./prompt')
 const { settingsOf: subagentSettings, inheritedTools, taskMessage } = require('./subagent')
 const { createTranscript } = require('./transcript')
 const { selectTools, toolDefinitions, byName } = require('./tools')
@@ -44,6 +44,8 @@ const { resolveWorkspace, ensureWorkspace } = require('./workspace')
  * @param {object} [options.integrations] shared destinations, global config
  * @param {boolean} [options.unattended] withdraws the tools that wait for an answer
  * @param {object} [options.jobs] job launcher, for the run_job tool
+ * @param {{id: string, input: object}|null} [options.work] the queue item this
+ *   execution was handed, reachable from the prompts as ${work.input}
  * @param {Array<{role: string, content: string}>} [options.history] previous
  *   turns of a resumed conversation, inserted after the instructions
  * @param {typeof fetch} [options.fetchImpl]
@@ -63,6 +65,8 @@ async function createSession({
   unattended = false,
   discord = null,
   jobs = null,
+  work = null,
+  workStore = null,
   history = [],
   fetchImpl = fetch,
   onEvent = () => {},
@@ -150,6 +154,10 @@ async function createSession({
     discord: discord ?? createDiscordSender({ integrations, env, fetchImpl }),
     mirrorReports: integrations.mirrorReportsToDiscord !== false,
     jobs,
+    // The item being processed, for the tools that speak about it. A sub-agent
+    // sees the same one: it is working on the caller's item, not its own.
+    work,
+    workStore,
     triggers,
     fetchImpl,
     runCommand: environment.runCommand,
@@ -221,6 +229,7 @@ async function createSession({
             sandboxed: environment.sandboxed,
             toolNames: [...childByName.keys()],
             subAgent: true,
+            work,
           }),
         },
         { role: 'user', content: taskMessage({ task, context }) },
@@ -250,6 +259,7 @@ async function createSession({
         trigger,
         sandboxed: environment.sandboxed,
         toolNames: [...toolsByName.keys()],
+        work,
       }),
     },
     ...history.filter(
@@ -361,7 +371,10 @@ async function runAgent(options) {
 
   try {
     const result = await session.runTurn({
-      content: job.runner.agent.prompt,
+      // The item is put into the request itself, where the job asked for it.
+      // The prompt is what the model is being told to do, and a run that came
+      // off a queue is being told to do it to one particular thing.
+      content: expandWork(job.runner.agent.prompt, options.work ?? null),
       signal: options.signal,
     })
 

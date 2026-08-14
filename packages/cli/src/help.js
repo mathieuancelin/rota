@@ -90,6 +90,25 @@ const COMMANDS = [
     source: SOURCE.API,
   },
   {
+    name: 'work',
+    argument: '<verb> [id]',
+    arity: 2,
+    summary: 'the durable queues: list, add, show, retry, cancel, rm',
+    detail:
+      'A job with a `work` trigger takes its items one at a time until there are ' +
+      'none left, and nothing is asked of a model to discover an empty queue.\n\n' +
+      '  work list [job]        what is queued, oldest first\n' +
+      '  work add <job>         queue one, with --input and --id\n' +
+      '  work show <id>         one item in full, input and result included\n' +
+      '  work retry <id>        put a finished item back, attempts reset\n' +
+      '  work cancel <id>       give up on it without running it\n' +
+      '  work rm <id>           remove it outright\n\n' +
+      '--input takes JSON: a reference to the work, not the work itself. --id ' +
+      'names the item, which is what makes queueing idempotent — replaying the ' +
+      'same event is then refused instead of queueing it twice.',
+    source: SOURCE.API,
+  },
+  {
     name: 'run',
     argument: '<id>',
     summary: 'start a job now — agent jobs included',

@@ -117,6 +117,7 @@ function createClient({ base, token }) {
     base,
     get: (path) => request('GET', path),
     post: (path, body) => request('POST', path, body),
+    delete: (path) => request('DELETE', path),
 
     /**
      * Reads /api/events until the caller stops caring.
