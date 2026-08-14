@@ -6,6 +6,7 @@ const assert = require('node:assert/strict')
 const { EventEmitter } = require('node:events')
 
 const { Scheduler } = require('../src/scheduler')
+const { nextRunAt } = require('../src/scheduler/next-run')
 
 const MINUTE = 60_000
 const HOUR = 3_600_000
@@ -1216,6 +1217,14 @@ test('a spent once alongside a cron leaves the cron alone', async () => {
 
   const next = scheduler.nextRunByJob().get('mixed')
   assert.ok(next, 'the cron is still armed')
-  assert.ok(Date.parse(next) > Date.now(), 'and points at a future occurrence')
+  // The cron's own next occurrence, and not "some instant in the future": a
+  // cron whose hour has just gone by legitimately points at a missed
+  // occurrence, and asking for a future one made this depend on the wall clock
+  // — it held between 10:00 and 09:00 and broke in the hour between. Which is
+  // how it was found: `bun test` runs the process in UTC where `node --test`
+  // keeps the local zone, so the two runtimes sat on either side of that hour.
+  const expected = nextRunAt(job.triggers[1], { lastRunAt: at + 1000, anchorAt: at + 1000 })
+  assert.equal(Date.parse(next), expected, 'at the instant the cron alone would give')
+  assert.notEqual(Date.parse(next), at, 'and not at the once, which is spent')
   scheduler.stop()
 })

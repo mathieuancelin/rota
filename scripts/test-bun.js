@@ -20,6 +20,15 @@
 //     fails on one that does not, under one runner only, which is close to
 //     unreadable from a CI log. The declarative `test.skip(...)` is honoured by
 //     both, so there is a correct form to point at.
+//
+// And one difference in the environment rather than in the API, worth knowing
+// before reading a failure here as a Bun bug: **`bun test` runs the process in
+// UTC**, where `node --test` — and `bun` on a plain script — keep the machine's
+// zone. So a test that computes a cron occurrence, formats a date, or names an
+// hour is answering a different question under the two runners. That is a
+// feature for reproducibility, and it means a failure appearing only here may
+// be a genuine zone assumption in the test rather than a divergence in the
+// code. Both are worth fixing; they are not fixed in the same place.
 
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
